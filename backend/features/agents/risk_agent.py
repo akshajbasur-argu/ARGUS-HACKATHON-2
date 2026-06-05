@@ -8,11 +8,15 @@ non-negotiable invariants:
     under-rate risk even if the model is too lenient;
   * overall_risk_level is also raised to the worst individual flag;
   * critical  => safe_to_proceed = False AND requires_physician_clearance = True;
-  * at least one emergency sign is always present;
-  * a deterministic baseline assessment is used when there is no API key or the
-    call fails — the safety layer never hard-fails.
+  * at least one emergency sign is always present.
 
-Run standalone (API key optional — degrades to baseline):
+The assessment is grounded in a live Gemini web search and always comes from a
+real LLM call: there is no offline baseline. If Gemini is unavailable the agent
+raises (the Coordinator logs it as a per-agent error) rather than emitting
+fabricated clinical content. The deterministic floor above still applies to the
+LLM's output, so safety can never depend on the model being right.
+
+Run standalone (requires GEMINI_API_KEY):
     python -m features.agents.risk_agent      # from backend/
     python features/agents/risk_agent.py
 """
@@ -28,7 +32,6 @@ if __name__ == "__main__" and __package__ in (None, ""):
 # ------------------------------------------------------------------------------
 
 import asyncio
-import os
 from typing import Literal
 
 from pydantic import BaseModel, ValidationError
@@ -39,6 +42,7 @@ from features.agents.base import (
     call_claude,
     extract_json,
 )
+from features.agents.research import gemini_grounded_research, grounding_block
 from schemas.agent_schemas import AgentName, AgentOutput, UserProfile
 
 AGENT_NAME = AgentName.RISK
@@ -242,42 +246,44 @@ def _assign_flag_ids(flags: list[_MedicalFlag]) -> None:
         used.add(fid)
 
 
-# --- Assessment sources -----------------------------------------------------
+# --- Research query ---------------------------------------------------------
 
 
-def _baseline_assessment(profile: UserProfile) -> _RiskData:
-    """Fully deterministic conservative assessment (no LLM)."""
-    flags = _baseline_flags(profile)
-    level = _condition_floor(profile)
-    for f in flags:
-        level = _max_level(level, _SEVERITY_TO_RISK[f.severity])
-    return _RiskData(
-        overall_risk_level=level,  # type: ignore[arg-type]
-        medical_flags=flags,
-        safe_to_proceed=level != "critical",
-        requires_physician_clearance=level in ("high", "critical"),
-        contraindicated_exercises=(
-            ["Maximal-intensity / HIIT without clearance"]
-            if _has(profile, "heart_disease", "cardiac", "arrhythmia")
-            else []
-        ),
-        contraindicated_foods=(
-            ["High-sodium processed foods"] if _has(profile, "hypertension") else []
-        ),
-        drug_interaction_warnings=[],
-        emergency_signs=_default_emergency_signs(profile),
+def _research_query(profile: UserProfile) -> str:
+    """Query for live clinical safety guidance for this profile."""
+    goal = profile.primary_goal.value.replace("_", " ")
+    conditions = " ".join(profile.medical_conditions[:3]).replace("_", " ")
+    return " ".join(
+        p
+        for p in (
+            conditions or "general health",
+            goal,
+            "diet exercise contraindications safety guidelines",
+        )
+        if p
     )
 
 
+# --- LLM assessment ---------------------------------------------------------
+
+
 async def _llm_assessment(
-    sub_task: str, profile: UserProfile, peer_context: dict | None
+    sub_task: str,
+    profile: UserProfile,
+    peer_context: dict | None,
+    *,
+    grounding: str = "",
 ) -> tuple[_RiskData, str, str]:
     """Returns (risk_data, verdict, reasoning). Raises AgentError on failure."""
     user = sub_task
     if peer_context:
         user += f"\n\nPeer agent outputs to review for contraindications:\n{peer_context}"
     raw = await call_claude(
-        RISK_SYSTEM_PROMPT, user, temperature=0.2, max_tokens=2048, prefill="{"
+        RISK_SYSTEM_PROMPT + grounding,
+        user,
+        temperature=0.2,
+        max_tokens=2048,
+        prefill="{",
     )
     parsed = extract_json(raw)
     try:
@@ -337,19 +343,23 @@ async def run(
     round: int = 1,
     session_context: SessionContext | None = None,
 ) -> AgentOutput:
-    """Assess risk and return a validated AgentOutput; never hard-fails."""
+    """Assess risk and return a validated AgentOutput.
+
+    Always uses a live, grounded LLM assessment — there is no offline baseline.
+    A Gemini failure propagates (the Coordinator logs it as a per-agent error)
+    rather than emitting fabricated clinical content. The deterministic floor in
+    `_enforce_invariants` still applies, so safety never depends on the model.
+    """
     if session_context:
         sub_task += session_context.revision_block(AGENT_NAME.value)
-    verdict = reasoning = ""
-    if os.environ.get("GEMINI_API_KEY"):
-        try:
-            data, verdict, reasoning = await _llm_assessment(
-                sub_task, profile, peer_context
-            )
-        except AgentError:
-            data = _baseline_assessment(profile)
-    else:
-        data = _baseline_assessment(profile)
+
+    research = await gemini_grounded_research(_research_query(profile))
+    data, verdict, reasoning = await _llm_assessment(
+        sub_task,
+        profile,
+        peer_context,
+        grounding=grounding_block(research["summary"], research["sources"]),
+    )
 
     data = _enforce_invariants(data, profile)
 
@@ -368,13 +378,16 @@ async def run(
         f"{f.severity}:{f.flag_id} ({f.agent_responsible})" for f in data.medical_flags
     ]
 
+    out_data = data.model_dump()
+    out_data["sources"] = research["sources"]
+
     return AgentOutput(
         agent_name=AGENT_NAME.value,
         verdict=verdict,
         confidence=_confidence_for(profile),
         reasoning=reasoning,
         flags=summary_flags,
-        data=data.model_dump(),
+        data=out_data,
         round=round,
     )
 

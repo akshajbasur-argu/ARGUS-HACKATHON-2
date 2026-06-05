@@ -1,7 +1,7 @@
 import { useState } from "react";
 import AppShell, { type AgentStatus } from "./components/layout/AppShell";
 import OnboardingForm from "./features/onboarding/OnboardingForm";
-import AgentTraceView from "./features/agent-trace/AgentTraceView";
+import AgentTracePanel from "./features/agent-trace/AgentTracePanel";
 import ResultsPanel from "./features/dashboard/ResultsPanel";
 import type { FinalPlan } from "./lib/api";
 
@@ -31,7 +31,7 @@ export default function App() {
           onError={() => setStatus("error")}
         />
       }
-      trace={<AgentTraceView planId={planId} />}
+      trace={<AgentTracePanel planId={planId} />}
       results={
         plan ? (
           <ResultsPanel plan={plan} />

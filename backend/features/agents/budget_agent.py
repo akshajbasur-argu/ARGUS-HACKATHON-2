@@ -32,6 +32,7 @@ from features.agents.base import (
     call_claude,
     extract_json,
 )
+from features.agents.research import gemini_grounded_research, grounding_block
 from schemas.agent_schemas import AgentName, AgentOutput, UserProfile
 
 AGENT_NAME = AgentName.BUDGET
@@ -59,12 +60,13 @@ _GENERIC_OPTIMISATIONS = [
 
 BUDGET_SYSTEM_PROMPT = """\
 You are a certified financial planner specialising in consumer health economics
-in the Indian market. You know approximate costs of groceries, gym memberships,
-supplements, and healthcare in Indian Tier-1 and Tier-2 cities.
+in the Indian market. You price groceries, gym memberships, and supplements for
+Indian Tier-1 and Tier-2 cities.
 
-Use realistic 2024 Indian market prices, e.g. brown rice ~Rs.80/kg, paneer
-~Rs.350/kg, toor dal ~Rs.140/kg, eggs ~Rs.7 each, milk ~Rs.60/L; gym membership
-Rs.1500-4000/month (prorate to weekly); basic supplements Rs.150-600/month.
+PRICING SOURCE: a WEB RESEARCH CONTEXT block with live Indian market prices is
+appended below. Use those current prices for every line item. Only when a
+specific item is not covered there, fall back to a realistic current
+Indian-market estimate — never invent prices that contradict the live data.
 
 Respond with ONLY one valid JSON object — no preamble, no markdown fences:
 {
@@ -116,6 +118,20 @@ class _BudgetCore(BaseModel):
 
 
 # --- Helpers ----------------------------------------------------------------
+
+
+def _research_query(profile: UserProfile) -> str:
+    """Query for live Indian grocery/gym/supplement prices to ground costs."""
+    diet = profile.dietary_restrictions[0].lower() if profile.dietary_restrictions else ""
+    parts = [
+        "current India grocery prices per kg INR",
+        f"{diet} foods" if diet else "staple foods dal rice vegetables",
+        "milk eggs paneer fruits",
+    ]
+    if profile.gym_access:
+        parts.append("gym membership monthly cost India")
+    parts.append("protein supplement price India")
+    return " ".join(parts)
 
 
 def _classify(category: str) -> str:
@@ -211,8 +227,14 @@ async def run(
     if session_context:
         user_message += session_context.revision_block(AGENT_NAME.value)
 
+    # Ground real INR prices live before the LLM emits the cost_breakdown.
+    research = await gemini_grounded_research(_research_query(profile))
+    system_prompt = BUDGET_SYSTEM_PROMPT + grounding_block(
+        research["summary"], research["sources"]
+    )
+
     raw = await call_claude(
-        BUDGET_SYSTEM_PROMPT,
+        system_prompt,
         user_message,
         temperature=0.3,
         max_tokens=2048,
@@ -226,6 +248,7 @@ async def run(
         raise AgentParseError(f"Budget data failed validation: {exc}") from exc
 
     data, flags = _compute_budget(core, profile, peer_context)
+    data["sources"] = research["sources"]
     flags += [str(f) for f in parsed.get("flags", []) if str(f).strip()]
 
     verdict = str(parsed.get("verdict", "")).strip()

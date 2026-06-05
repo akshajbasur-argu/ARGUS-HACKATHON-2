@@ -5,18 +5,23 @@
   run(profile, ...)                   -> FinalPlan         (full pipeline)
 
 The pipeline emits TraceEvents at every step so the live Agent Trace View can
-follow along. Both decompose and synthesise have deterministic fallbacks, so the
-whole system runs end-to-end without an API key (degraded but coherent).
+follow along. The system hard-requires GEMINI_API_KEY: decompose and synthesise
+call Gemini directly and fail fast (no offline fallback) when the model returns
+nothing usable, surfacing the failure as an ERROR trace event.
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 import uuid
 
-from features.agents.base import AgentError, SessionContext, call_claude, extract_json
+from features.agents.base import (
+    AgentParseError,
+    SessionContext,
+    call_claude,
+    extract_json,
+)
 from features.coordinator.prompts import (
     COORDINATOR_DECOMPOSE_SYSTEM,
     SYNTHESIS_SYSTEM_PROMPT,
@@ -47,50 +52,39 @@ _RISK_PENALTY = {"low": 0.0, "medium": 1.5, "high": 3.5, "critical": 6.0}
 # ---------------------------------------------------------------------------
 
 
-def _fallback_subtasks(profile: UserProfile) -> dict[str, str]:
-    """Deterministic decomposition when the LLM is unavailable."""
-    p = profile
-    base = (
-        f"age {p.age}, {p.sex.value}, {p.weight_kg:g} kg, {p.height_cm:g} cm, "
-        f"{p.activity_level.value}, goal {p.primary_goal.value}, "
-        f"medical {p.medical_conditions or ['none']}, "
-        f"diet {p.dietary_restrictions or ['none']}, "
-        f"budget INR {p.weekly_budget_inr:g}/week, gym access {p.gym_access}"
-    )
-    return {
-        "nutrition": f"You are the Nutrition Agent. User: {base}. Design a 5-meal daily diet plan.",
-        "macros": f"You are the Macros Agent. User: {base}. Compute precise macro/micro targets.",
-        "fitness": f"You are the Fitness Agent. User: {base}. Design a 7-day workout programme.",
-        "risk": f"You are the Risk Agent. User: {base}. Review for contraindications and red flags.",
-        "budget": f"You are the Budget Agent. User: {base}. Cost the plan against the weekly budget.",
-        "critic": (
-            "You are the Critic Agent. Review nutrition, macros, fitness, risk, and budget "
-            "outputs for consistency, safety, and budget feasibility."
-        ),
-    }
+async def decompose(
+    profile: UserProfile, directives: str | None = None
+) -> dict[str, str]:
+    """Break the profile into 6 self-contained sub_tasks (one per agent).
 
-
-async def decompose(profile: UserProfile) -> dict[str, str]:
-    """Break the profile into 6 self-contained sub_tasks (one per agent)."""
-    if not os.environ.get("GEMINI_API_KEY"):
-        return _fallback_subtasks(profile)
-    try:
-        raw = await call_claude(
-            COORDINATOR_DECOMPOSE_SYSTEM,
-            profile.model_dump_json(),
-            temperature=0.3,
-            max_tokens=2048,
-            prefill="{",
+    `directives` is an optional free-form change request (from a re-plan turn,
+    e.g. "make it cheaper") that is woven into every sub-task so the whole
+    pipeline honours it. Fails fast (raises) if Gemini is unavailable or returns
+    an incomplete set of sub-tasks — there is no offline decomposition.
+    """
+    user_content = profile.model_dump_json()
+    if directives:
+        user_content += (
+            "\n\nADDITIONAL USER DIRECTIVE FOR THIS REVISION (apply across ALL "
+            f"sub-tasks): {directives}"
         )
-        parsed = extract_json(raw)
-        required = {"nutrition", "macros", "fitness", "risk", "budget", "critic"}
-        if not required.issubset(parsed) or not all(
-            isinstance(parsed[k], str) and parsed[k].strip() for k in required
-        ):
-            return _fallback_subtasks(profile)
-        return {k: parsed[k] for k in required}
-    except AgentError:
-        return _fallback_subtasks(profile)
+    raw = await call_claude(
+        COORDINATOR_DECOMPOSE_SYSTEM,
+        user_content,
+        temperature=0.3,
+        max_tokens=2048,
+        prefill="{",
+    )
+    parsed = extract_json(raw)
+    required = {"nutrition", "macros", "fitness", "risk", "budget", "critic"}
+    if not required.issubset(parsed) or not all(
+        isinstance(parsed.get(k), str) and parsed[k].strip() for k in required
+    ):
+        raise AgentParseError(
+            "Coordinator decompose returned incomplete sub-tasks; missing/blank: "
+            f"{sorted(k for k in required if not str(parsed.get(k, '')).strip())}"
+        )
+    return {k: parsed[k] for k in required}
 
 
 # ---------------------------------------------------------------------------
@@ -115,73 +109,39 @@ def _health_score(
     return round(max(0.0, min(10.0, score)), 1)
 
 
-def _fallback_narrative(
-    profile: UserProfile, by_name: dict[str, AgentOutput], final_safe: bool
-) -> tuple[str, list[str], list[str]]:
-    goal = profile.primary_goal.value.replace("_", " ")
-    macros = by_name.get("macros")
-    target = macros.data.get("target_calories") if macros else None
-    risk = by_name.get("risk")
-    level = str(risk.data.get("overall_risk_level", "low")) if risk else "low"
-    budget = by_name.get("budget")
-    within = budget.data.get("within_budget", True) if budget else True
-
-    user_summary = (
-        f"Here is your personalised {goal} plan. It balances nutrition, training, "
-        f"medical safety, and your weekly budget."
-        + ("" if final_safe else " Please obtain physician clearance before starting.")
-    )
-    insights = [
-        ("Physician clearance is recommended before you begin."
-         if not final_safe else f"Your overall medical risk is assessed as {level}."),
-        f"Daily calorie target is {int(target)} kcal." if target else
-        "Calorie targets are aligned across your nutrition and macros plans.",
-        "Your training week mixes cardio and strength to match your goal.",
-        ("Your plan fits within your weekly budget." if within
-         else "Your plan is slightly over budget — see the suggested swaps."),
-        "Consistency over four weeks matters more than intensity in any single session.",
-    ]
-    actions = [
-        "Day 1: Log your meals and take a 20-minute brisk walk.",
-        "Day 2: Complete the first strength session; hydrate well.",
-        "Day 3: Active recovery — light stretching and a short walk.",
-        "Day 4: Cardio session; prep meals for the next two days.",
-        "Day 5: Strength session; review your calorie log.",
-        "Day 6: Longer cardio or a fun activity you enjoy.",
-        "Day 7: Rest, reflect on the week, and plan next week's groceries.",
-    ]
-    return user_summary, insights, actions
-
-
 async def _llm_narrative(
     profile: UserProfile,
     by_name: dict[str, AgentOutput],
     critic: AgentOutput,
-) -> tuple[str, list[str], list[str]] | None:
-    if not os.environ.get("GEMINI_API_KEY"):
-        return None
-    try:
-        payload = {
-            "profile": profile.model_dump(),
-            "agent_outputs": {n: o.data for n, o in by_name.items()},
-            "qa_review": critic.data,
-        }
-        raw = await call_claude(
-            SYNTHESIS_SYSTEM_PROMPT,
-            f"Synthesise a plan from:\n{payload}",
-            temperature=0.5,
-            max_tokens=1500,
-            prefill="{",
+) -> tuple[str, list[str], list[str]]:
+    """Generate the synthesis narrative via Gemini.
+
+    Raises AgentParseError on an incomplete narrative — there is no offline
+    fallback, so a failure here surfaces as a pipeline ERROR rather than canned
+    prose.
+    """
+    payload = {
+        "profile": profile.model_dump(),
+        "agent_outputs": {n: o.data for n, o in by_name.items()},
+        "qa_review": critic.data,
+    }
+    raw = await call_claude(
+        SYNTHESIS_SYSTEM_PROMPT,
+        f"Synthesise a plan from:\n{payload}",
+        temperature=0.5,
+        max_tokens=1500,
+        prefill="{",
+    )
+    parsed = extract_json(raw)
+    summary = str(parsed.get("user_summary", "")).strip()
+    insights = [str(x).strip() for x in parsed.get("key_insights", []) if str(x).strip()]
+    actions = [str(x).strip() for x in parsed.get("action_steps_week_1", []) if str(x).strip()]
+    if not summary or len(insights) < 5 or len(actions) < 7:
+        raise AgentParseError(
+            "Synthesis narrative incomplete "
+            f"(summary={bool(summary)}, insights={len(insights)}, actions={len(actions)})"
         )
-        parsed = extract_json(raw)
-        summary = str(parsed.get("user_summary", "")).strip()
-        insights = [str(x).strip() for x in parsed.get("key_insights", []) if str(x).strip()]
-        actions = [str(x).strip() for x in parsed.get("action_steps_week_1", []) if str(x).strip()]
-        if not summary or len(insights) < 5 or len(actions) < 7:
-            return None
-        return summary, insights[:5], actions[:7]
-    except AgentError:
-        return None
+    return summary, insights[:5], actions[:7]
 
 
 async def synthesise(
@@ -197,10 +157,9 @@ async def synthesise(
     consistency = float(critic_output.data.get("consistency_score", 1.0))
     final_safe = bool(critic_output.data.get("final_recommendation_safe", True))
 
-    narrative = await _llm_narrative(profile, by_name, critic_output)
-    if narrative is None:
-        narrative = _fallback_narrative(profile, by_name, final_safe)
-    user_summary, key_insights, action_steps = narrative
+    user_summary, key_insights, action_steps = await _llm_narrative(
+        profile, by_name, critic_output
+    )
 
     def data_of(name: str) -> dict:
         out = by_name.get(name)
@@ -233,24 +192,37 @@ async def run(
     profile: UserProfile,
     max_debate_rounds: int = 3,
     run_id: str | None = None,
+    directives: str | None = None,
 ) -> FinalPlan:
-    """decompose -> fan-out (5 agents) -> debate -> synthesise. Emits trace."""
+    """decompose -> fan-out (5 agents) -> debate -> synthesise. Emits trace.
+
+    `directives` carries an optional re-plan change request through decomposition.
+    """
     run_id = run_id or uuid.uuid4().hex
     tracer = Tracer(run_id)
     session = SessionContext(plan_id=run_id)
     await tracer.emit(TraceEventType.RUN_STARTED, message="Run started")
 
     try:
-        sub_tasks = await decompose(profile)
+        sub_tasks = await decompose(profile, directives)
         await tracer.emit(
             TraceEventType.AGENT_COMPLETED,
             agent_name="coordinator",
             message="Decomposed profile into sub-tasks",
+            # The inputs the Coordinator routed to each agent — the graph reads
+            # this to label Coordinator -> specialist edges and the step detail.
+            payload={"sub_tasks": sub_tasks},
         )
 
         # Fan out the five specialists in parallel (timed per agent).
         for name in SPECIALISTS:
-            await tracer.emit(TraceEventType.AGENT_STARTED, agent_name=name, round=1)
+            await tracer.emit(
+                TraceEventType.AGENT_STARTED,
+                agent_name=name,
+                round=1,
+                # Full input received by the agent; no peers at the initial fan-out.
+                payload={"input": sub_tasks[name], "peer_context_agents": [], "round": 1},
+            )
 
         async def _run_timed(agent: str) -> tuple[AgentOutput, float]:
             t0 = time.perf_counter()
@@ -273,7 +245,16 @@ async def run(
                     agent_name=name,
                     round=1,
                     message=out.verdict,
-                    payload={"confidence": out.confidence, "flags": out.flags},
+                    # Full output for the step-detail drawer: structured data,
+                    # reasoning, web sources, confidence, flags.
+                    payload={
+                        "verdict": out.verdict,
+                        "reasoning": out.reasoning,
+                        "output": out.data,
+                        "sources": out.data.get("sources", []),
+                        "confidence": out.confidence,
+                        "flags": out.flags,
+                    },
                     duration_ms=duration_ms,
                 )
             else:
@@ -294,7 +275,13 @@ async def run(
         )
 
         # Synthesise the final plan.
-        await tracer.emit(TraceEventType.SYNTHESIS, agent_name="coordinator")
+        await tracer.emit(
+            TraceEventType.SYNTHESIS,
+            agent_name="coordinator",
+            message="Synthesising final plan",
+            # Which agents' outputs feed the synthesis — drives all -> Synthesis edges.
+            payload={"inputs_from": [o.agent_name for o in debate.final_outputs]},
+        )
         plan = await synthesise(
             debate.final_outputs,
             debate.critic,

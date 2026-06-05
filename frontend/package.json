@@ -10,11 +10,12 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@hookform/resolvers": "3.9.1",
+    "@xyflow/react": "^12.11.0",
+    "framer-motion": "11.11.17",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "framer-motion": "11.11.17",
     "react-hook-form": "7.53.2",
-    "@hookform/resolvers": "3.9.1",
     "zod": "3.23.8"
   },
   "devDependencies": {

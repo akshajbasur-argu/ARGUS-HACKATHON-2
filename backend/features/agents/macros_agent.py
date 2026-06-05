@@ -4,10 +4,16 @@ This is a *computation* agent, not a research agent. Every number is derived in
 Python from established formulae (Mifflin-St Jeor BMR -> activity TDEE ->
 goal-adjusted target -> macro split), because LLM arithmetic is non-deterministic
 and unsafe for a medical-adjacent product. The model is used only to phrase the
-human-readable verdict/reasoning, and never to produce or alter a number; if no
-API key is present it falls back to a deterministic narrative.
+human-readable verdict/reasoning — *grounded* in a live web search for supporting
+facts — and never to produce or alter a number. The macro maths is NEVER fetched
+knowledge: web grounding informs only the narration prose, not the figures.
 
-Run standalone (API key optional — math runs without it):
+The deterministic narration is retained ONLY as transient-failure resilience for
+the prose (it restates the already-computed numbers, not fetched knowledge), so a
+flaky narration/grounding call can never discard the authoritative macro maths.
+
+Run standalone (needs GEMINI_API_KEY for the grounded narration; the maths is
+pure Python):
     python -m features.agents.macros_agent      # from backend/
     python features/agents/macros_agent.py
 """
@@ -23,7 +29,6 @@ if __name__ == "__main__" and __package__ in (None, ""):
 # ------------------------------------------------------------------------------
 
 import asyncio
-import os
 
 from pydantic import BaseModel
 
@@ -33,6 +38,7 @@ from features.agents.base import (
     call_claude,
     extract_json,
 )
+from features.agents.research import gemini_grounded_research, grounding_block
 from schemas.agent_schemas import (
     ActivityLevel,
     AgentName,
@@ -254,26 +260,51 @@ def _deterministic_narrative(data: _MacrosData, profile: UserProfile) -> tuple[s
     return verdict, reasoning
 
 
-async def _narrate(sub_task: str, data: _MacrosData, profile: UserProfile) -> tuple[str, str]:
-    """Best-effort LLM narration; deterministic fallback on any failure/no key."""
-    if not os.environ.get("GEMINI_API_KEY"):
-        return _deterministic_narrative(data, profile)
+def _research_query(profile: UserProfile) -> str:
+    """Query for live nutrition-science facts to support the narration prose."""
+    goal = profile.primary_goal.value.replace("_", " ")
+    condition = "diabetes" if _is_diabetic(profile) else ""
+    return " ".join(
+        p
+        for p in (goal, condition, "daily calorie protein macronutrient guidelines")
+        if p
+    )
+
+
+async def _narrate(
+    sub_task: str, data: _MacrosData, profile: UserProfile
+) -> tuple[str, str, list[dict[str, str]]]:
+    """LLM narration grounded in a live web search; returns (verdict, reasoning,
+    sources).
+
+    The deterministic narration is a transient-failure fallback only: it restates
+    the already-computed numbers (not fetched knowledge), so a flaky grounding/LLM
+    call never discards the authoritative macro maths. `sources` is [] when
+    grounding was unavailable.
+    """
+    research = await gemini_grounded_research(_research_query(profile))
+    sources = research["sources"]
     try:
         user = (
             f"Sub-task: {sub_task}\n\nComputed targets (final, do not change):\n"
             f"{data.model_dump_json(indent=2)}"
         )
         raw = await call_claude(
-            MACROS_SYSTEM_PROMPT, user, temperature=0.2, max_tokens=512, prefill="{"
+            MACROS_SYSTEM_PROMPT + grounding_block(research["summary"], sources),
+            user,
+            temperature=0.2,
+            max_tokens=512,
+            prefill="{",
         )
         parsed = extract_json(raw)
         verdict = str(parsed.get("verdict", "")).strip()
         reasoning = str(parsed.get("reasoning", "")).strip()
         if verdict and reasoning:
-            return verdict, reasoning
+            return verdict, reasoning, sources
     except AgentError:
         pass
-    return _deterministic_narrative(data, profile)
+    verdict, reasoning = _deterministic_narrative(data, profile)
+    return verdict, reasoning, sources
 
 
 # --- Public entry point -----------------------------------------------------
@@ -291,7 +322,10 @@ async def run(
     if session_context:
         sub_task += session_context.revision_block(AGENT_NAME.value)
     data, flags = compute_macros(profile)
-    verdict, reasoning = await _narrate(sub_task, data, profile)
+    verdict, reasoning, sources = await _narrate(sub_task, data, profile)
+
+    out_data = data.model_dump()
+    out_data["sources"] = sources
 
     return AgentOutput(
         agent_name=AGENT_NAME.value,
@@ -299,7 +333,7 @@ async def run(
         confidence=CONFIDENCE,
         reasoning=reasoning,
         flags=flags,
-        data=data.model_dump(),
+        data=out_data,
         round=round,
     )
 

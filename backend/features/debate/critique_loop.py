@@ -10,6 +10,7 @@ exist, so it always terminates.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
@@ -73,6 +74,10 @@ async def run_debate(
 
     while True:
         rounds += 1
+        if tracer is not None:
+            await tracer.emit(
+                TraceEventType.AGENT_STARTED, agent_name="critic", round=rounds
+            )
         critic_out = await critic_agent.review(current, profile, round=rounds)
         session.record_critique(rounds, critic_out)
 
@@ -85,7 +90,11 @@ async def run_debate(
                 message=critic_out.verdict,
                 payload={
                     "rejected_agents": rejected,
+                    "approved_agents": critic_out.data.get("approved_agents", []),
+                    "revision_requests": critic_out.data.get("revision_requests", {}),
+                    "contradictions": critic_out.data.get("contradictions", []),
                     "consistency_score": critic_out.data["consistency_score"],
+                    "critique_summary": critic_out.data.get("critique_summary", ""),
                 },
             )
         if not rejected or rounds >= max_rounds:
@@ -93,9 +102,24 @@ async def run_debate(
 
         revisions: dict[str, str] = critic_out.data["revision_requests"]
 
+        async def _run_timed(
+            runner: AgentRunner, sub_task: str, *, peer_context: dict, round: int
+        ) -> tuple[AgentOutput, float]:
+            t0 = time.perf_counter()
+            out = await runner(
+                sub_task,
+                profile,
+                peer_context=peer_context,
+                round=round,
+                session_context=session,
+            )
+            return out, (time.perf_counter() - t0) * 1000.0
+
         # Build re-run coroutines for every rejected agent we can actually re-run.
         names: list[str] = []
-        coros: list[Awaitable[AgentOutput]] = []
+        inputs: dict[str, str] = {}
+        peers_of: dict[str, list[str]] = {}
+        coros: list[Awaitable[tuple[AgentOutput, float]]] = []
         for name in rejected:
             runner = AGENT_RUNNERS.get(name)
             sub_task = sub_tasks.get(name)
@@ -107,13 +131,11 @@ async def run_debate(
             )
             peer_context = {n: current[n].data for n in current if n != name}
             names.append(name)
+            inputs[name] = revised_sub_task
+            peers_of[name] = [n for n in current if n != name]
             coros.append(
-                runner(
-                    revised_sub_task,
-                    profile,
-                    peer_context=peer_context,
-                    round=rounds + 1,
-                    session_context=session,
+                _run_timed(
+                    runner, revised_sub_task, peer_context=peer_context, round=rounds + 1
                 )
             )
 
@@ -121,11 +143,44 @@ async def run_debate(
             # Nothing re-runnable (e.g. missing sub_tasks) — avoid spinning.
             break
 
+        # Re-run start events (round n+1) so the graph re-animates revised nodes.
+        if tracer is not None:
+            for name in names:
+                await tracer.emit(
+                    TraceEventType.AGENT_STARTED,
+                    agent_name=name,
+                    round=rounds + 1,
+                    message=f"Revising (round {rounds + 1})",
+                    payload={
+                        "input": inputs[name],
+                        "peer_context_agents": peers_of[name],
+                        "round": rounds + 1,
+                    },
+                )
+
         results = await asyncio.gather(*coros, return_exceptions=True)
         for name, result in zip(names, results):
             # On a failed re-run, keep the agent's previous output.
-            if isinstance(result, AgentOutput):
-                current[name] = result
+            if isinstance(result, tuple):
+                out, duration_ms = result
+                current[name] = out
+                if tracer is not None:
+                    await tracer.emit(
+                        TraceEventType.AGENT_COMPLETED,
+                        agent_name=name,
+                        round=rounds + 1,
+                        message=out.verdict,
+                        payload={
+                            "verdict": out.verdict,
+                            "reasoning": out.reasoning,
+                            "output": out.data,
+                            "sources": out.data.get("sources", []),
+                            "confidence": out.confidence,
+                            "flags": out.flags,
+                            "revised": True,
+                        },
+                        duration_ms=duration_ms,
+                    )
         session.record_outputs(rounds + 1, current)
 
     assert critic_out is not None  # loop runs at least once

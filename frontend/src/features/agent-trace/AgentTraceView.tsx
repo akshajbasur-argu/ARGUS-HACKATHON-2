@@ -1,128 +1,26 @@
 /**
- * Agent Trace View — live SSE timeline of the multi-agent run.
+ * Execution Log — the secondary, chronological view of the multi-agent run.
  *
- * Consumes useTraceStream (GET /api/stream/{planId}) and renders a vertical
- * timeline: the five specialists as agent cards that transition
- * idle -> thinking -> complete/flagged, then the debate rounds + critic, then
- * synthesis and done markers.
- *
- * Note on field names: the backend TraceEvent uses `type`/`ts` (not
- * event_type/timestamp). "↻ Revised" is derived from an agent appearing in a
- * debate_round's rejected_agents, since re-runs aren't individually traced.
+ * The same vertical timeline as before (agents idle → thinking → complete/flagged,
+ * debate rounds, synthesis, done), now driven by the shared `DerivedTrace` instead
+ * of subscribing to SSE itself, and with every row clickable to open the Step
+ * Detail drawer. The interactive graph (AgentTraceGraph) is the primary view.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useTraceStream } from "../../lib/sse";
-import type { TraceEvent } from "../../lib/api";
+import { useEffect, useRef, useState } from "react";
 import SkeletonCard from "../../components/ui/SkeletonCard";
+import {
+  AGENT_META,
+  SPECIALISTS,
+  type AgentNodeState,
+  type DerivedTrace,
+  type NodeStatus,
+} from "./deriveTrace";
 
-interface AgentTraceViewProps {
-  planId: string | null;
+interface ExecutionLogProps {
+  derived: DerivedTrace;
+  eventCount: number;
+  onSelect: (nodeKey: string) => void;
 }
-
-type CardStatus = "idle" | "thinking" | "complete" | "flagged" | "error";
-
-interface AgentState {
-  status: CardStatus;
-  verdict: string;
-  confidence?: number;
-  flags: string[];
-  revised: boolean;
-}
-
-interface RoundInfo {
-  round: number;
-  rejected: string[];
-  consistency?: number;
-  verdict: string;
-}
-
-const AGENTS: Record<string, { icon: string; label: string }> = {
-  nutrition: { icon: "🥗", label: "Nutrition" },
-  macros: { icon: "🧮", label: "Macros" },
-  fitness: { icon: "💪", label: "Fitness" },
-  risk: { icon: "🛡️", label: "Risk" },
-  budget: { icon: "💰", label: "Budget" },
-  critic: { icon: "⚖️", label: "Critic" },
-};
-const SPECIALIST_ORDER = ["nutrition", "macros", "fitness", "risk", "budget"];
-
-const asNumber = (v: unknown): number | undefined =>
-  typeof v === "number" ? v : undefined;
-const asStringArray = (v: unknown): string[] =>
-  Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
-
-// --- Derive view state from the raw event stream ----------------------------
-
-interface DerivedState {
-  agents: Record<string, AgentState>;
-  rounds: RoundInfo[];
-  synthesising: boolean;
-  done: boolean;
-  decomposed: boolean;
-}
-
-function derive(events: TraceEvent[]): DerivedState {
-  const agents: Record<string, AgentState> = {};
-  const rounds: RoundInfo[] = [];
-  let synthesising = false;
-  let done = false;
-  let decomposed = false;
-
-  const ensure = (name: string): AgentState =>
-    (agents[name] ??= { status: "idle", verdict: "", flags: [], revised: false });
-
-  for (const e of events) {
-    const name = e.agent_name ?? "";
-    switch (e.type) {
-      case "agent_started":
-        if (name in AGENTS) ensure(name).status = "thinking";
-        break;
-      case "agent_completed":
-        if (name === "coordinator") {
-          decomposed = true;
-        } else if (name in AGENTS) {
-          const a = ensure(name);
-          const flags = asStringArray(e.payload["flags"]);
-          a.status = flags.length > 0 ? "flagged" : "complete";
-          a.verdict = e.message;
-          a.confidence = asNumber(e.payload["confidence"]);
-          a.flags = flags;
-        }
-        break;
-      case "debate_round": {
-        const rejected = asStringArray(e.payload["rejected_agents"]);
-        rounds.push({
-          round: e.round ?? rounds.length + 1,
-          rejected,
-          consistency: asNumber(e.payload["consistency_score"]),
-          verdict: e.message,
-        });
-        rejected.forEach((r) => {
-          if (r in AGENTS) ensure(r).revised = true;
-        });
-        const critic = ensure("critic");
-        critic.status = rejected.length > 0 ? "flagged" : "complete";
-        critic.verdict = e.message;
-        break;
-      }
-      case "synthesis":
-        synthesising = true;
-        break;
-      case "run_completed":
-        done = true;
-        synthesising = false;
-        break;
-      case "error":
-        if (name in AGENTS) ensure(name).status = "error";
-        break;
-      default:
-        break;
-    }
-  }
-  return { agents, rounds, synthesising, done, decomposed };
-}
-
-// --- Small pieces -----------------------------------------------------------
 
 function ConfidenceBar({ value }: { value: number }) {
   const pct = Math.round(value * 100);
@@ -159,7 +57,10 @@ function Verdict({ text }: { text: string }) {
       {text.length > 90 && (
         <button
           type="button"
-          onClick={() => setExpanded((v) => !v)}
+          onClick={(e) => {
+            e.stopPropagation();
+            setExpanded((v) => !v);
+          }}
           className="mt-1 text-xs text-accent-primary hover:underline"
         >
           {expanded ? "Show less" : "Show more"}
@@ -169,21 +70,31 @@ function Verdict({ text }: { text: string }) {
   );
 }
 
-function AgentCard({ name, state }: { name: string; state: AgentState }) {
-  const meta = AGENTS[name];
+const BORDER_BY_STATUS: Record<NodeStatus, string> = {
+  idle: "border-l-4 border-border",
+  thinking: "border-l-4 border-accent-primary pulse-glow",
+  complete: "border-l-4 border-accent-primary",
+  flagged: "border-l-4 border-accent-warning",
+  error: "border-l-4 border-accent-danger",
+};
+
+function AgentCard({
+  name,
+  state,
+  onClick,
+}: {
+  name: string;
+  state: AgentNodeState;
+  onClick: () => void;
+}) {
+  const meta = AGENT_META[name];
   if (!meta) return null;
 
-  const borderByStatus: Record<CardStatus, string> = {
-    idle: "border-l-4 border-border",
-    thinking: "border-l-4 border-accent-primary pulse-glow",
-    complete: "border-l-4 border-accent-primary",
-    flagged: "border-l-4 border-accent-warning",
-    error: "border-l-4 border-accent-danger",
-  };
-
   return (
-    <div
-      className={`glass p-4 ${borderByStatus[state.status]}`}
+    <button
+      type="button"
+      onClick={onClick}
+      className={`glass w-full p-4 text-left transition-transform hover:scale-[1.01] ${BORDER_BY_STATUS[state.status]}`}
       style={{ animation: "springIn var(--duration-fast) var(--spring)" }}
     >
       <div className="flex items-center justify-between">
@@ -215,121 +126,129 @@ function AgentCard({ name, state }: { name: string; state: AgentState }) {
           {state.flags.map((f) => (
             <span
               key={f}
-              className="rounded-pill bg-accent-warning/15 px-2 py-0.5 text-xs text-accent-warning"
+              className="rounded-pill bg-accent-warning-soft px-2 py-0.5 text-xs text-accent-warning"
             >
               {f}
             </span>
           ))}
         </div>
       )}
-    </div>
+    </button>
   );
 }
 
-function Marker({ icon, label }: { icon: string; label: string }) {
+function Marker({
+  icon,
+  label,
+  onClick,
+}: {
+  icon: string;
+  label: string;
+  onClick?: () => void;
+}) {
   return (
-    <div
-      className="flex items-center gap-2 text-sm text-content-muted"
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!onClick}
+      className={`flex items-center gap-2 text-sm text-content-muted ${
+        onClick ? "hover:text-content-secondary" : "cursor-default"
+      }`}
       style={{ animation: "springIn var(--duration-fast) var(--spring)" }}
     >
       <span>{icon}</span>
       <span>{label}</span>
-    </div>
+    </button>
   );
 }
 
-// --- Main component ---------------------------------------------------------
+export default function AgentTraceView({
+  derived,
+  eventCount,
+  onSelect,
+}: ExecutionLogProps) {
+  const { agents, rounds, synthesising, done, decomposed } = derived;
 
-export default function AgentTraceView({ planId }: AgentTraceViewProps) {
-  const { events, connected, error } = useTraceStream(planId);
-  const { agents, rounds, synthesising, done, decomposed } = useMemo(
-    () => derive(events),
-    [events],
-  );
-
-  // Auto-scroll the timeline to the latest activity.
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [events.length, synthesising, done]);
+  }, [eventCount, synthesising, done]);
 
-  if (!planId) {
-    return (
-      <div className="flex h-full min-h-[12rem] flex-col items-center justify-center text-center text-content-muted">
-        <span className="text-3xl">🧭</span>
-        <p className="mt-2 text-sm">Fill in your profile to watch the agents work.</p>
-      </div>
-    );
-  }
-
-  const startedAgents = SPECIALIST_ORDER.filter(
+  const startedAgents = SPECIALISTS.filter(
     (n) => agents[n] && agents[n]!.status !== "idle",
   );
   const critic = agents["critic"];
 
   return (
-    <div className="flex h-full flex-col">
-      {/* Live status header */}
-      <div className="mb-3 flex items-center gap-2 text-xs">
-        <span
-          className={`h-2 w-2 rounded-full ${
-            error ? "bg-accent-danger" : connected ? "bg-emerald-400 animate-pulse" : "bg-content-muted"
-          }`}
-        />
-        <span className="text-content-muted">
-          {error ? "Disconnected" : connected ? "Live" : done ? "Finished" : "Connecting…"}
-        </span>
-      </div>
-
-      <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto pr-1">
-        {events.length === 0 ? (
-          // Before the first SSE event: shimmer placeholders for the 5 agents.
-          SPECIALIST_ORDER.map((n) => <SkeletonCard key={n} />)
-        ) : (
-          <>
-            <Marker icon="🚀" label="Run started" />
-            {decomposed && <Marker icon="🧭" label="Profile decomposed into sub-tasks" />}
-
-        {startedAgents.map((name) => (
-          <AgentCard key={name} name={name} state={agents[name]!} />
-        ))}
-
-        {rounds.map((r) => (
-          <div key={r.round} className="space-y-2">
-            {r.round > 1 && (
-              <div className="flex items-center gap-2 py-1">
-                <div className="h-px flex-1 bg-border" />
-                <span className="rounded-pill bg-accent-secondary-soft px-3 py-0.5 text-xs text-accent-secondary">
-                  Round {r.round}
-                </span>
-                <div className="h-px flex-1 bg-border" />
-              </div>
-            )}
+    <div ref={scrollRef} className="h-full space-y-3 overflow-y-auto pr-1">
+      {eventCount === 0 ? (
+        SPECIALISTS.map((n) => <SkeletonCard key={n} />)
+      ) : (
+        <>
+          <Marker icon="🚀" label="Run started" />
+          {decomposed && (
             <Marker
-              icon="⚖️"
-              label={
-                r.rejected.length > 0
-                  ? `Critic: revising ${r.rejected.join(", ")}` +
-                    (r.consistency !== undefined
-                      ? ` (consistency ${Math.round(r.consistency * 100)}%)`
-                      : "")
-                  : `Critic: consistent` +
-                    (r.consistency !== undefined
-                      ? ` (${Math.round(r.consistency * 100)}%)`
-                      : "")
-              }
+              icon="🧭"
+              label="Profile decomposed into sub-tasks"
+              onClick={() => onSelect("coordinator")}
             />
-          </div>
-        ))}
+          )}
 
-        {critic && <AgentCard name="critic" state={critic} />}
+          {startedAgents.map((name) => (
+            <AgentCard
+              key={name}
+              name={name}
+              state={agents[name]!}
+              onClick={() => onSelect(name)}
+            />
+          ))}
 
-            {synthesising && <Marker icon="✨" label="Synthesising final plan…" />}
-            {done && <Marker icon="✅" label="Plan ready" />}
-          </>
-        )}
-      </div>
+          {rounds.map((r) => (
+            <div key={r.round} className="space-y-2">
+              {r.round > 1 && (
+                <div className="flex items-center gap-2 py-1">
+                  <div className="h-px flex-1 bg-border" />
+                  <span className="rounded-pill bg-accent-secondary-soft px-3 py-0.5 text-xs text-accent-secondary">
+                    Round {r.round}
+                  </span>
+                  <div className="h-px flex-1 bg-border" />
+                </div>
+              )}
+              <Marker
+                icon="⚖️"
+                onClick={() => onSelect("critic")}
+                label={
+                  r.rejected.length > 0
+                    ? `Critic: revising ${r.rejected.join(", ")}` +
+                      (r.consistency !== undefined
+                        ? ` (consistency ${Math.round(r.consistency * 100)}%)`
+                        : "")
+                    : `Critic: consistent` +
+                      (r.consistency !== undefined
+                        ? ` (${Math.round(r.consistency * 100)}%)`
+                        : "")
+                }
+              />
+            </div>
+          ))}
+
+          {critic && (
+            <AgentCard name="critic" state={critic} onClick={() => onSelect("critic")} />
+          )}
+
+          {synthesising && (
+            <Marker
+              icon="✨"
+              label="Synthesising final plan…"
+              onClick={() => onSelect("synthesis")}
+            />
+          )}
+          {done && (
+            <Marker icon="✅" label="Plan ready" onClick={() => onSelect("synthesis")} />
+          )}
+        </>
+      )}
     </div>
   );
 }

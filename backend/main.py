@@ -19,7 +19,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.conversations import router as conversations_router
 from api.routes import router as api_router
+from features.conversations import store as conversation_store
+from features.conversations.store import RedisConversationStore
 from features.trace.logger import RedisTraceStore
 from features.trace.logger import logger as trace_logger
 
@@ -33,7 +36,19 @@ except ModuleNotFoundError:  # redis is optional; in-memory fallback still works
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Set up (and tear down) the Redis connection pool when configured."""
+    """Set up (and tear down) the Redis connection pool when configured.
+
+    Fails fast if GEMINI_API_KEY is missing: every agent now hard-requires live
+    Gemini calls (web-grounded research + reasoning) with no offline fallback, so
+    booting without a key would only produce 500s at request time.
+    """
+    if not os.getenv("GEMINI_API_KEY"):
+        raise RuntimeError(
+            "GEMINI_API_KEY is not set. The agents require live Gemini access "
+            "(web-grounded research + reasoning); there is no offline fallback. "
+            "Set GEMINI_API_KEY in backend/.env before starting the server."
+        )
+
     redis_url = os.getenv("REDIS_URL")
     client = None
     if redis_url and aioredis is not None:
@@ -45,6 +60,7 @@ async def lifespan(app: FastAPI):
         try:
             await client.ping()
             trace_logger.set_store(RedisTraceStore(client))
+            conversation_store.set_store(RedisConversationStore(client))
             log.info("Redis store enabled at %s", redis_url)
         except Exception:  # noqa: BLE001 — degrade to in-memory, don't crash boot
             log.warning(
@@ -91,6 +107,7 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix="/api")
+app.include_router(conversations_router, prefix="/api")
 
 
 @app.get("/healthz", tags=["health"])

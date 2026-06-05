@@ -29,7 +29,7 @@ from features.agents.base import (
     call_claude,
     extract_json,
 )
-from features.agents.search import tavily_search
+from features.agents.research import gemini_grounded_research, grounding_block
 from schemas.agent_schemas import AgentName, AgentOutput, UserProfile
 
 AGENT_NAME = AgentName.NUTRITION
@@ -104,21 +104,12 @@ def _confidence_for(profile: UserProfile) -> float:
 
 
 def _search_query(profile: UserProfile) -> str:
-    """e.g. 'weight loss vegetarian diet plan India 2024'."""
+    """e.g. 'weight loss vegetarian diabetes diet plan India foods'."""
     goal = profile.primary_goal.value.replace("_", " ")
     diet = profile.dietary_restrictions[0].lower() if profile.dietary_restrictions else ""
-    return " ".join(p for p in (goal, diet, "diet plan India 2024") if p)
-
-
-def _research_block(results: list[dict[str, str]]) -> str:
-    lines = [
-        f"- {r['title']}: {r['content'][:500]} ({r['url']})"
-        for r in results
-        if r.get("content") or r.get("title")
-    ]
-    return (
-        "\n\nWEB RESEARCH CONTEXT (recent sources; use to ground food/cost choices, "
-        "do NOT copy verbatim):\n" + "\n".join(lines)
+    condition = "diabetes" if _is_diabetic(profile) else ""
+    return " ".join(
+        p for p in (goal, diet, condition, "diet plan India recommended foods") if p
     )
 
 
@@ -140,12 +131,12 @@ async def run(
     if session_context:
         user_message += session_context.revision_block(AGENT_NAME.value)
 
-    # Web-search grounding (best-effort; no-op without TAVILY_API_KEY).
-    results = await tavily_search(_search_query(profile), max_results=2)
-    sources = [r["url"] for r in results if r.get("url")]
-    system_prompt = NUTRITION_SYSTEM_PROMPT
-    if results:
-        system_prompt += _research_block(results)
+    # Live Gemini-grounded web research (best-effort; empty on search failure).
+    research = await gemini_grounded_research(_search_query(profile))
+    sources = research["sources"]
+    system_prompt = NUTRITION_SYSTEM_PROMPT + grounding_block(
+        research["summary"], sources
+    )
 
     raw = await call_claude(
         system_prompt,

@@ -172,3 +172,82 @@ class TraceEvent(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
     ts: float  # epoch seconds
     duration_ms: float | None = None  # wall time for the step, when measured
+
+
+# ---------------------------------------------------------------------------
+# Conversation + plan-version DAG (chat / versioning / history)
+# ---------------------------------------------------------------------------
+
+
+class ChatRole(str, Enum):
+    USER = "user"
+    ASSISTANT = "assistant"
+
+
+class ChatTurnStatus(str, Enum):
+    COLLECTING = "collecting"  # still gathering profile fields — ask follow-ups
+    READY = "ready"            # profile complete -> trigger the initial plan run
+    ANSWER = "answer"          # a question about the current plan; answer, no re-run
+    REPLAN = "replan"          # a change request -> run a new plan version
+
+
+class ChatMessage(BaseModel):
+    role: ChatRole
+    content: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class PlanVersion(BaseModel):
+    """One node in a conversation's branchable plan-version DAG.
+
+    `plan_id` points at the existing FinalPlan + TraceEvent[] in the store, so all
+    the run/trace machinery is reused unchanged per version.
+    """
+
+    version_id: str
+    plan_id: str
+    parent_version_id: str | None = None
+    label: str = ""
+    change_request: str | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class Conversation(BaseModel):
+    """Top-level entity: a chat that owns a profile + a DAG of plan versions."""
+
+    id: str
+    title: str = "New chat"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    messages: list[ChatMessage] = Field(default_factory=list)
+    # Partial UserProfile assembled through chat; validated into UserProfile only
+    # once every required field is present (status "ready").
+    profile: dict[str, Any] = Field(default_factory=dict)
+    versions: list[PlanVersion] = Field(default_factory=list)
+
+
+class ConversationSummary(BaseModel):
+    """Lightweight sidebar list item."""
+
+    id: str
+    title: str
+    updated_at: datetime
+    version_count: int = 0
+
+
+class ChatMessageRequest(BaseModel):
+    """Body for POST /api/conversations/{id}/messages."""
+
+    content: str
+    # The version the user is currently viewing; a replan branches from here.
+    parent_version_id: str | None = None
+
+
+class ChatTurnResponse(BaseModel):
+    """Result of a chat turn: assistant reply + any newly-spawned plan version."""
+
+    assistant_message: str
+    status: ChatTurnStatus
+    profile: dict[str, Any] = Field(default_factory=dict)
+    version: PlanVersion | None = None  # set when the turn started a new run
+    conversation: Conversation

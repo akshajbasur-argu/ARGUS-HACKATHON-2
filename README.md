@@ -5,8 +5,15 @@ plan. Six specialist agents (Nutrition, Macros, Fitness, Risk, Budget, Critic)
 fan out from a Coordinator, debate via a peer-critique loop, and synthesise a
 final recommendation. Every agent I/O streams to a live Agent Trace View.
 
+Agents ground their reasoning in **live Google Search** via Gemini's native
+grounding tool (real INR prices, current nutrition/exercise/clinical guidance),
+attaching clickable sources to their output. There is **no offline fallback**:
+`GEMINI_API_KEY` + internet are required, and the server fails fast at boot
+without a key. (Macros stays pure Mifflin-St Jeor maths by design — only its
+narration is grounded; the numbers are never fetched.)
+
 **Stack:** React 18 · Vite · Tailwind · TypeScript · Python 3.11 · FastAPI ·
-Pydantic v2 · Gemini `gemini-2.0-flash` · Docker Compose.
+Pydantic v2 · Gemini `gemini-2.5-flash` (web-grounded) · Docker Compose.
 
 ## Layout
 

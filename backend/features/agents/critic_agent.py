@@ -22,7 +22,6 @@ if __name__ == "__main__" and __package__ in (None, ""):
 # ------------------------------------------------------------------------------
 
 import asyncio
-import os
 from typing import Any
 
 from pydantic import BaseModel
@@ -234,14 +233,16 @@ def _scores(n_contradictions: int, mean_conf: float) -> tuple[float, float]:
 async def _summarise(
     outputs: dict[str, AgentOutput], contradictions: list[_Contradiction]
 ) -> str:
+    # Deterministic floor (a factual count of the contradictions the rule-based
+    # checks already found — not fetched knowledge). Retained as transient-failure
+    # resilience only: the Critic is awaited directly in the debate loop, so a
+    # raised exception here would abort the entire run.
     deterministic = (
         f"{len(contradictions)} contradiction(s) detected across "
         f"{len(outputs)} agent outputs."
         if contradictions
         else "No cross-agent contradictions detected; outputs are mutually consistent."
     )
-    if not os.environ.get("GEMINI_API_KEY"):
-        return deterministic
     try:
         payload = {
             "agent_outputs": {n: o.data for n, o in outputs.items()},

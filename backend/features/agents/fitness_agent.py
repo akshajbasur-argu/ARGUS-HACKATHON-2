@@ -32,6 +32,7 @@ from features.agents.base import (
     call_claude,
     extract_json,
 )
+from features.agents.research import gemini_grounded_research, grounding_block
 from schemas.agent_schemas import (
     AgentName,
     AgentOutput,
@@ -170,6 +171,24 @@ def _weekly_stats(plan: list[_DayPlan]) -> dict[str, int]:
     }
 
 
+def _research_query(profile: UserProfile) -> str:
+    """Query for live evidence-based exercise guidance for this profile."""
+    goal = profile.primary_goal.value.replace("_", " ")
+    setting = "home bodyweight" if not profile.gym_access else "gym"
+    conditions = " ".join(profile.medical_conditions[:2]).replace("_", " ")
+    return " ".join(
+        p
+        for p in (
+            goal,
+            "workout programme guidelines",
+            setting,
+            conditions,
+            "exercise recommendations",
+        )
+        if p
+    )
+
+
 def _build_constraints(profile: UserProfile) -> str:
     lines = [
         "- Produce exactly 7 day entries (Monday..Sunday).",
@@ -213,8 +232,14 @@ async def run(
     if session_context:
         user_message += session_context.revision_block(AGENT_NAME.value)
 
+    # Ground exercise guidance live (best-effort; empty on search failure).
+    research = await gemini_grounded_research(_research_query(profile))
+    system_prompt = FITNESS_SYSTEM_PROMPT + grounding_block(
+        research["summary"], research["sources"]
+    )
+
     raw = await call_claude(
-        FITNESS_SYSTEM_PROMPT,
+        system_prompt,
         user_message,
         temperature=0.5,
         max_tokens=MAX_OUTPUT_TOKENS,
@@ -253,6 +278,7 @@ async def run(
         "weekly_stats": _weekly_stats(core.weekly_plan),
         "progression_plan": core.progression_plan,
         "equipment_needed": equipment,
+        "sources": research["sources"],
     }
 
     return AgentOutput(

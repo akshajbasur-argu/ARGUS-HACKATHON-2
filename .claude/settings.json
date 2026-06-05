@@ -1,7 +1,14 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Read(//home/akshajb@id.argusoft.com/.claude/plans/**)",
+      "Bash(./venv/bin/python -m py_compile features/agents/research.py features/agents/nutrition_agent.py features/agents/budget_agent.py features/agents/fitness_agent.py features/agents/risk_agent.py features/agents/macros_agent.py features/agents/critic_agent.py features/coordinator/coordinator.py main.py)",
+      "Bash(./venv/bin/poetry env *)",
+      "Bash(poetry env *)",
+      "Bash(./venv/bin/python -c \"import pydantic, httpx, dotenv; print\\('agent deps OK \\(pydantic/httpx/dotenv present\\)'\\)\")",
+      "Bash(./venv/bin/python -c \"import fastapi; print\\('fastapi present'\\)\")",
+      "Bash(echo \"EXIT: $?\")"
     ]
   }
 }
