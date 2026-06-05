@@ -6,6 +6,8 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FinalPlan } from "../../lib/api";
+import { downloadPlanPdf } from "../../lib/exportPlanPdf";
+import { combinedQuery, productLinks } from "../../lib/productLinks";
 
 // --- Loose shapes for the agent .data payloads (any field may be absent) ----
 
@@ -78,6 +80,29 @@ const DANGER = "var(--color-accent-danger)";
 const INFO = "var(--color-accent-info)";
 
 const inr = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
+
+// --- Product purchase links (Amazon / Blinkit / Zepto) ----------------------
+
+function StoreLinks({ query, label = "Buy" }: { query: string; label?: string }) {
+  const links = productLinks(query);
+  if (!links.length) return null;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1 align-middle">
+      <span className="text-[10px] text-content-muted">🛒 {label}:</span>
+      {links.map((l) => (
+        <a
+          key={l.store}
+          href={l.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="rounded-pill border border-border px-1.5 py-0.5 text-[10px] text-content-secondary transition-colors hover:border-accent-primary hover:text-accent-primary"
+        >
+          {l.short}
+        </a>
+      ))}
+    </span>
+  );
+}
 
 // --- Animation hooks --------------------------------------------------------
 
@@ -221,30 +246,44 @@ function NutritionSection({ data }: { data: NutritionData }) {
       {meals.length === 0 ? (
         <p className="text-sm text-content-muted">No meal plan available.</p>
       ) : (
-        <div className="-mx-1 flex gap-3 overflow-x-auto pb-2">
-          {meals.map((m, i) => (
-            <div
-              key={`${m.meal}-${i}`}
-              className="glass min-w-[10rem] shrink-0 p-3"
-              style={{ animation: `springIn var(--duration-base) var(--spring) ${i * 50}ms both` }}
-            >
-              <div className="mb-1 flex items-center justify-between">
-                <span className="font-medium">{m.meal ?? `Meal ${i + 1}`}</span>
-                <span className="text-xs text-accent-primary">{m.calories ?? 0} kcal</span>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {meals.map((m, i) => {
+            const foods = m.foods ?? [];
+            return (
+              <div
+                key={`${m.meal}-${i}`}
+                className="glass flex min-w-0 flex-col p-3"
+                style={{ animation: `springIn var(--duration-base) var(--spring) ${i * 50}ms both` }}
+              >
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate font-medium">{m.meal ?? `Meal ${i + 1}`}</span>
+                  <span className="shrink-0 text-xs text-accent-primary">{m.calories ?? 0} kcal</span>
+                </div>
+                <ul className="space-y-0.5 text-xs text-content-muted">
+                  {foods.map((f, j) => (
+                    <li key={j} className="break-words">• {f}</li>
+                  ))}
+                </ul>
+                {foods.length > 0 && (
+                  <div className="mt-2">
+                    <StoreLinks query={combinedQuery(foods)} label="ingredients" />
+                  </div>
+                )}
               </div>
-              <ul className="space-y-0.5 text-xs text-content-muted">
-                {(m.foods ?? []).map((f, j) => (
-                  <li key={j}>• {f}</li>
-                ))}
-              </ul>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
       {(data.supplement_suggestions ?? []).length > 0 && (
-        <p className="mt-3 text-xs text-content-muted">
-          Supplements: {(data.supplement_suggestions ?? []).join(", ")}
-        </p>
+        <div className="mt-3 space-y-1.5">
+          <p className="text-xs font-medium text-content-secondary">Supplements</p>
+          {(data.supplement_suggestions ?? []).map((s, i) => (
+            <div key={i} className="flex flex-wrap items-center gap-2 text-xs text-content-muted">
+              <span className="min-w-0 break-words">{s}</span>
+              <StoreLinks query={s} />
+            </div>
+          ))}
+        </div>
       )}
     </Section>
   );
@@ -482,11 +521,14 @@ function BudgetSection({ data }: { data: BudgetData }) {
         </div>
       </div>
       {alts.length > 0 && (
-        <div className="mt-3 space-y-1 text-xs text-content-muted">
+        <div className="mt-3 space-y-1.5 text-xs text-content-muted">
           {alts.map((a, i) => (
-            <div key={i}>
-              ↔ {a.original} → <span className="text-accent-primary">{a.alternative}</span>
-              {a.saving_inr ? ` (save ${inr(a.saving_inr)})` : ""}
+            <div key={i} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="min-w-0 break-words">
+                ↔ {a.original} → <span className="text-accent-primary">{a.alternative}</span>
+                {a.saving_inr ? ` (save ${inr(a.saving_inr)})` : ""}
+              </span>
+              {a.alternative && <StoreLinks query={a.alternative} />}
             </div>
           ))}
         </div>
@@ -572,11 +614,15 @@ export default function ResultsPanel({ plan }: { plan: FinalPlan }) {
         </div>
       </div>
 
-      <NutritionSection data={nutrition} />
-      <MacrosSection data={macros} />
-      <FitnessSection data={fitness} />
-      <RiskSection data={risk} />
-      <BudgetSection data={budget} />
+      {/* Sections flow into multiple columns on wider screens instead of one
+          tall single column. */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <NutritionSection data={nutrition} />
+        <MacrosSection data={macros} />
+        <FitnessSection data={fitness} />
+        <RiskSection data={risk} />
+        <BudgetSection data={budget} />
+      </div>
 
       {/* Footer */}
       <div className="glass p-5">
@@ -603,13 +649,13 @@ export default function ResultsPanel({ plan }: { plan: FinalPlan }) {
           </>
         )}
 
-        <div className="mt-5 flex items-center justify-between">
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
           <button
             type="button"
-            onClick={() => window.print()}
+            onClick={() => downloadPlanPdf(plan)}
             className="rounded-md border border-border px-4 py-2 text-sm text-content-secondary transition-colors duration-base ease-spring hover:border-accent-primary hover:text-accent-primary print:hidden"
           >
-            ⬇ Download Plan
+            ⬇ Download Plan (PDF)
           </button>
           <span className="text-xs text-content-muted">
             Score {plan.overall_health_score}/10 · {plan.debate_rounds} round(s)
