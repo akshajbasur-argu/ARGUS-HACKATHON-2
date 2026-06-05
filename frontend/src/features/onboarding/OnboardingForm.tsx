@@ -30,9 +30,26 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 interface OnboardingFormProps {
-  onPlanStart: (planId: string) => void;
+  onPlanStart?: (planId: string) => void;
   onPlanComplete?: (plan: FinalPlan) => void;
   onError?: (error: unknown) => void;
+  /** When provided, submit assembles a chat message instead of POSTing /run. */
+  onQuickFill?: (message: string) => void;
+}
+
+function buildMessage(d: FormValues): string {
+  const parts = [
+    `I'm a ${d.age} year old ${d.sex}, ${d.weight_kg}kg, ${d.height_cm}cm, ` +
+      `${d.activity_level.replace("_", " ")}.`,
+    `My goal is ${d.primary_goal.replace("_", " ")}.`,
+  ];
+  if (d.medical_conditions.length)
+    parts.push(`Medical conditions: ${d.medical_conditions.join(", ")}.`);
+  if (d.dietary_restrictions.length)
+    parts.push(`Dietary restrictions: ${d.dietary_restrictions.join(", ")}.`);
+  parts.push(`My weekly budget is ₹${d.weekly_budget_inr}.`);
+  parts.push(`Gym access: ${d.gym_access ? "yes" : "no"}.`);
+  return parts.join(" ");
 }
 
 // --- Option metadata --------------------------------------------------------
@@ -199,6 +216,7 @@ export default function OnboardingForm({
   onPlanStart,
   onPlanComplete,
   onError,
+  onQuickFill,
 }: OnboardingFormProps) {
   const [step, setStep] = useState(0);
   const [direction, setDirection] = useState<"right" | "left">("right");
@@ -237,12 +255,17 @@ export default function OnboardingForm({
   };
 
   const onSubmit = async (data: FormValues) => {
+    // Quick-fill mode: hand an assembled message to the chat instead of /run.
+    if (onQuickFill) {
+      onQuickFill(buildMessage(data));
+      return;
+    }
     const planId =
       typeof crypto !== "undefined" && "randomUUID" in crypto
         ? crypto.randomUUID()
         : `run-${Date.now()}`;
     setSubmitting(true);
-    onPlanStart(planId); // parent opens the SSE trace before the run begins
+    onPlanStart?.(planId); // parent opens the SSE trace before the run begins
     try {
       const plan = await runPlan({ profile: data as UserProfile, run_id: planId });
       onPlanComplete?.(plan);
@@ -446,6 +469,8 @@ export default function OnboardingForm({
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-base/40 border-t-base" />
                 AI agents working…
               </>
+            ) : onQuickFill ? (
+              "Use these details"
             ) : (
               "Generate My Health Plan"
             )}
