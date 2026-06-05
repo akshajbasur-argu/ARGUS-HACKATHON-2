@@ -6,10 +6,13 @@ services:
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - CORS_ORIGINS=http://localhost:5173,http://localhost:8080
-      # Uncomment when wiring the Redis-backed TraceBus (Infra track):
-      # - REDIS_URL=redis://redis:6379/0
+      # Durable plan/trace persistence via the bundled Redis service.
+      - REDIS_URL=redis://redis:6379/0
     ports:
       - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
       interval: 10s
@@ -25,10 +28,20 @@ services:
     ports:
       - "8080:80"
 
-  # Optional — enable with:  docker compose --profile cache up
   redis:
     image: redis:7-alpine
     container_name: hpo-redis
-    profiles: ["cache"]
+    # Persist to disk (AOF) so plans survive a restart within their 7-day TTL.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  redis-data:

@@ -38,9 +38,11 @@ npm run dev                 # http://localhost:5173 (proxies /api -> :8000)
 ## Run with Docker
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-docker compose up --build           # frontend :8080, backend :8000
-docker compose --profile cache up   # also starts redis
+docker compose up --build           # frontend :8080, backend :8000, redis :6379
 ```
+
+Redis now backs durable plan/trace persistence and starts by default. Running
+the backend outside Docker without `REDIS_URL` falls back to an in-memory store.
 
 ## Parallel tracks (post-scaffold)
 

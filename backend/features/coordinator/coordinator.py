@@ -303,6 +303,9 @@ async def run(
             debate_rounds=debate.rounds,
         )
 
+        # Persist the finished plan so GET /api/plans/{plan_id} can serve it.
+        await tracer.save_result(plan)
+
         await tracer.emit(
             TraceEventType.RUN_COMPLETED,
             agent_name="coordinator",
