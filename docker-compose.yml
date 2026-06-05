@@ -1,0 +1,34 @@
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: hpo-backend
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - CORS_ORIGINS=http://localhost:5173,http://localhost:8080
+      # Uncomment when wiring the Redis-backed TraceBus (Infra track):
+      # - REDIS_URL=redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: hpo-frontend
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+
+  # Optional — enable with:  docker compose --profile cache up
+  redis:
+    image: redis:7-alpine
+    container_name: hpo-redis
+    profiles: ["cache"]
+    ports:
+      - "6379:6379"

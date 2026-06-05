@@ -1,0 +1,29 @@
+# --- Node / frontend ---
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.local
+
+# --- Python / backend ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+poetry.lock
+
+# --- Trace logs (JSONL replay files) ---
+backend/logs/
+logs/
+
+# --- Env & secrets ---
+.env
+*/.env
+!*.env.example
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+.DS_Store

@@ -1,0 +1,425 @@
+/* ============================================================================
+   VibeFlow OS — Design Token System
+   Premium AI-native design language · liquid energy · glass · spring motion
+   Single source of truth. Import this file once, globally.
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+:root {
+  /* ----------------------------------------------------------------------
+     COLOUR — Base & Surfaces (dark-first)
+     ---------------------------------------------------------------------- */
+  --color-base: #080C14;          /* deep navy-black — app background */
+  --color-surface-1: #0D1321;     /* raised panels */
+  --color-surface-2: #111827;     /* cards, modals */
+  --color-surface-3: #1A2332;     /* hover / elevated cards */
+  --color-overlay: rgba(8, 12, 20, 0.72);
+
+  /* Accents */
+  --color-accent-primary: #00D4AA;     /* teal-emerald — primary action */
+  --color-accent-primary-soft: #00D4AA22;
+  --color-accent-secondary: #7B5EA7;   /* electric violet — secondary */
+  --color-accent-secondary-soft: #7B5EA722;
+  --color-accent-warning: #F59E0B;     /* amber — warnings */
+  --color-accent-warning-soft: #F59E0B22;
+  --color-accent-danger: #FB5E6D;      /* red — risk / critical flags */
+  --color-accent-danger-soft: #FB5E6D22;
+  --color-accent-info: #5BA8FF;        /* blue — info / neutral state */
+
+  /* Text */
+  --color-text-primary: #F0F4FF;
+  --color-text-secondary: #AEBAD4;
+  --color-text-muted: #6B7A99;
+  --color-text-inverse: #080C14;
+
+  /* Borders & dividers */
+  --color-border-subtle: rgba(255, 255, 255, 0.06);
+  --color-border: rgba(255, 255, 255, 0.10);
+  --color-border-strong: rgba(255, 255, 255, 0.18);
+
+  /* Gradient stops (mesh / accents) */
+  --grad-stop-1: #00D4AA;
+  --grad-stop-2: #7B5EA7;
+  --grad-stop-3: #5BA8FF;
+  --gradient-mesh: linear-gradient(
+    120deg,
+    var(--grad-stop-1) 0%,
+    var(--grad-stop-2) 50%,
+    var(--grad-stop-3) 100%
+  );
+  --gradient-primary: linear-gradient(135deg, #00D4AA 0%, #00A88A 100%);
+  --gradient-secondary: linear-gradient(135deg, #7B5EA7 0%, #5B4490 100%);
+  --gradient-text: linear-gradient(120deg, #00D4AA 0%, #7B5EA7 60%, #5BA8FF 100%);
+
+  /* ----------------------------------------------------------------------
+     MOTION — durations & easing
+     ---------------------------------------------------------------------- */
+  --duration-instant: 100ms;
+  --duration-fast: 200ms;
+  --duration-base: 300ms;
+  --duration-slow: 400ms;
+  --duration-slower: 600ms;
+
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);   /* overshoot spring */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);     /* smooth decel */
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-linear: linear;
+
+  /* ----------------------------------------------------------------------
+     GLASS — frosted surface tokens
+     ---------------------------------------------------------------------- */
+  --glass-bg: rgba(255, 255, 255, 0.05);
+  --glass-bg-strong: rgba(255, 255, 255, 0.08);
+  --glass-border: rgba(255, 255, 255, 0.10);
+  --glass-blur: 20px;
+  --glass-blur-sm: 10px;
+  --glass-blur-lg: 40px;
+
+  /* ----------------------------------------------------------------------
+     TYPOGRAPHY
+     ---------------------------------------------------------------------- */
+  --font-display: 'Syne', ui-sans-serif, system-ui, sans-serif;
+  --font-body: 'DM Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+
+  /* Font sizes (fluid-friendly, rem based) */
+  --text-xs: 0.75rem;     /* 12px */
+  --text-sm: 0.875rem;    /* 14px */
+  --text-base: 1rem;      /* 16px */
+  --text-lg: 1.125rem;    /* 18px */
+  --text-xl: 1.375rem;    /* 22px */
+  --text-2xl: 1.75rem;    /* 28px */
+  --text-3xl: 2.25rem;    /* 36px */
+  --text-4xl: 3rem;       /* 48px */
+  --text-5xl: 4rem;       /* 64px */
+
+  --leading-tight: 1.15;
+  --leading-snug: 1.35;
+  --leading-normal: 1.55;
+  --leading-relaxed: 1.75;
+
+  --tracking-tight: -0.02em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.04em;
+
+  --weight-light: 300;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  --weight-display: 800;
+
+  /* ----------------------------------------------------------------------
+     SPACING SCALE (4px base grid)
+     ---------------------------------------------------------------------- */
+  --space-0: 0;
+  --space-px: 1px;
+  --space-1: 0.25rem;   /* 4 */
+  --space-2: 0.5rem;    /* 8 */
+  --space-3: 0.75rem;   /* 12 */
+  --space-4: 1rem;      /* 16 */
+  --space-5: 1.25rem;   /* 20 */
+  --space-6: 1.5rem;    /* 24 */
+  --space-8: 2rem;      /* 32 */
+  --space-10: 2.5rem;   /* 40 */
+  --space-12: 3rem;     /* 48 */
+  --space-16: 4rem;     /* 64 */
+  --space-20: 5rem;     /* 80 */
+  --space-24: 6rem;     /* 96 */
+
+  /* ----------------------------------------------------------------------
+     BORDER RADIUS SCALE
+     ---------------------------------------------------------------------- */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
+  --radius-pill: 999px;
+  --radius-full: 9999px;
+
+  /* ----------------------------------------------------------------------
+     SHADOW SCALE — depth + glow variants
+     ---------------------------------------------------------------------- */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.30);
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.40);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.50);
+  --shadow-xl: 0 24px 80px rgba(0, 0, 0, 0.55);
+
+  /* Glow variants — coloured ambient light */
+  --glow-primary: 0 0 24px rgba(0, 212, 170, 0.35), 0 0 4px rgba(0, 212, 170, 0.45);
+  --glow-primary-lg: 0 0 48px rgba(0, 212, 170, 0.45);
+  --glow-secondary: 0 0 24px rgba(123, 94, 167, 0.40), 0 0 4px rgba(123, 94, 167, 0.50);
+  --glow-warning: 0 0 24px rgba(245, 158, 11, 0.40);
+  --glow-danger: 0 0 24px rgba(251, 94, 109, 0.40);
+  --glow-inner: inset 0 0 24px rgba(0, 212, 170, 0.08);
+
+  /* ----------------------------------------------------------------------
+     Z-INDEX SCALE
+     ---------------------------------------------------------------------- */
+  --z-base: 0;
+  --z-raised: 10;
+  --z-sticky: 100;
+  --z-overlay: 1000;
+  --z-modal: 2000;
+  --z-toast: 3000;
+  --z-tooltip: 4000;
+}
+
+/* ============================================================================
+   KEYFRAMES
+   ========================================================================== */
+
+/* Floating background gradient — the signature VibeFlow mesh drift */
+@keyframes gradientFlow {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+/* Slow ambient mesh blob drift (for layered radial gradients) */
+@keyframes meshDrift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  33% {
+    transform: translate3d(3%, -4%, 0) scale(1.05);
+  }
+  66% {
+    transform: translate3d(-3%, 3%, 0) scale(0.97);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+/* Spring pop-in for cards / agents entering the trace */
+@keyframes springIn {
+  0% {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Soft pulse for "thinking" / live state */
+@keyframes pulseGlow {
+  0%,
+  100% {
+    box-shadow: var(--glow-primary);
+    opacity: 1;
+  }
+  50% {
+    box-shadow: var(--glow-primary-lg);
+    opacity: 0.78;
+  }
+}
+
+/* Shimmer sweep for skeleton / loading surfaces */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Continuous spin for loaders */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Multi-step form transitions — incoming step slides in from a direction */
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ============================================================================
+   UTILITY CLASSES
+   ========================================================================== */
+
+/* Frosted glass surface */
+.glass {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-radius: var(--radius-lg);
+}
+
+.glass-strong {
+  background: var(--glass-bg-strong);
+  border: 1px solid var(--color-border-strong);
+  backdrop-filter: blur(var(--glass-blur-lg));
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg));
+  border-radius: var(--radius-lg);
+}
+
+/* Animated floating mesh background — apply to a full-bleed layer */
+.gradient-mesh {
+  background: linear-gradient(
+    120deg,
+    var(--grad-stop-1),
+    var(--grad-stop-2),
+    var(--grad-stop-3),
+    var(--grad-stop-1)
+  );
+  background-size: 300% 300%;
+  animation: gradientFlow 18s var(--ease-in-out) infinite;
+}
+
+/* Gradient text — for display headings */
+.text-gradient {
+  background: var(--gradient-text);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* Glow helpers */
+.glow-primary { box-shadow: var(--glow-primary); }
+.glow-secondary { box-shadow: var(--glow-secondary); }
+.glow-warning { box-shadow: var(--glow-warning); }
+.glow-danger { box-shadow: var(--glow-danger); }
+
+/* Motion helpers */
+.spring-in { animation: springIn var(--duration-slow) var(--spring) both; }
+.pulse-glow { animation: pulseGlow 2.4s var(--ease-in-out) infinite; }
+
+/* Shimmer skeleton surface (loading placeholders) */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-2) 0%,
+    var(--color-surface-3) 50%,
+    var(--color-surface-2) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s linear infinite;
+  border-radius: var(--radius-sm);
+}
+
+/* ============================================================================
+   BASE / RESET
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+  background: var(--color-base);
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  font-weight: var(--weight-regular);
+  line-height: var(--leading-normal);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
+  margin: 0;
+}
+
+/* Respect users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ============================================================================
+   PRINT — clean PDF export (white bg, black text, no motion)
+   Redefining the colour tokens flips every token-based utility automatically.
+   ========================================================================== */
+@media print {
+  :root {
+    --color-base: #ffffff;
+    --color-surface-1: #ffffff;
+    --color-surface-2: #eeeeee;
+    --color-surface-3: #e4e4e4;
+    --color-text-primary: #000000;
+    --color-text-secondary: #1a1a1a;
+    --color-text-muted: #555555;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  body {
+    background: #ffffff !important;
+  }
+
+  .glass,
+  .glass-strong {
+    background: #ffffff !important;
+    border: 1px solid #cccccc !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    box-shadow: none !important;
+  }
+
+  .text-gradient {
+    background: none !important;
+    -webkit-text-fill-color: #000000 !important;
+    color: #000000 !important;
+  }
+
+  /* Collapse the 3-column shell so the printed plan spans the page. */
+  .vibeflow-grid {
+    display: block !important;
+  }
+}

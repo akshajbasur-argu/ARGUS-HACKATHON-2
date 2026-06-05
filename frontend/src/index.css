@@ -1,0 +1,6 @@
+/* VibeFlow tokens first (also pulls in the Google Fonts @import), then Tailwind. */
+@import "./styles/vibeflow.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
