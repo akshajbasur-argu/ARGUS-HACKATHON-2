@@ -256,7 +256,7 @@ def _deterministic_narrative(data: _MacrosData, profile: UserProfile) -> tuple[s
 
 async def _narrate(sub_task: str, data: _MacrosData, profile: UserProfile) -> tuple[str, str]:
     """Best-effort LLM narration; deterministic fallback on any failure/no key."""
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    if not os.environ.get("GEMINI_API_KEY"):
         return _deterministic_narrative(data, profile)
     try:
         user = (

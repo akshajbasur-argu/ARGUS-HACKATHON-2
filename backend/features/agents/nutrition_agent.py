@@ -1,10 +1,10 @@
 """Nutrition Research Agent — personalised diet plan, meal suggestions, rationale.
 
 Receives a self-contained sub_task from the Coordinator plus the UserProfile,
-makes one Anthropic call, and returns a validated AgentOutput whose `data` field
+makes one Gemini call, and returns a validated AgentOutput whose `data` field
 holds a structured 5-meal diet plan.
 
-Run standalone (needs ANTHROPIC_API_KEY):
+Run standalone (needs GEMINI_API_KEY):
     python -m features.agents.nutrition_agent      # from backend/
     python features/agents/nutrition_agent.py      # also works (see bootstrap)
 """

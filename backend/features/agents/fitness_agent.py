@@ -6,7 +6,7 @@ model: exactly 7 days, bodyweight-only when there's no gym, a cardiac HR cap
 flag for heart/BP conditions, and weekly_stats recomputed from the actual plan
 (guaranteeing they agree — the Critic relies on that).
 
-Run standalone (needs ANTHROPIC_API_KEY):
+Run standalone (needs GEMINI_API_KEY):
     python -m features.agents.fitness_agent      # from backend/
     python features/agents/fitness_agent.py
 """
@@ -24,7 +24,7 @@ if __name__ == "__main__" and __package__ in (None, ""):
 import asyncio
 from typing import Literal
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from features.agents.base import (
     AgentParseError,
@@ -43,6 +43,7 @@ AGENT_NAME = AgentName.FITNESS
 
 DEFAULT_CONFIDENCE = 0.85
 CAUTION_CONFIDENCE = 0.65  # cardiac condition present or medical_conditions > 2
+MAX_OUTPUT_TOKENS = 8192
 
 SessionType = Literal["Strength", "Cardio", "HIIT", "Rest", "Flexibility"]
 CARDIO_TYPES = {"Cardio", "HIIT"}
@@ -128,6 +129,13 @@ class _FitnessCore(BaseModel):
     equipment_needed: list[str]
 
 
+class _FitnessResponse(BaseModel):
+    verdict: str
+    reasoning: str
+    flags: list[str] = Field(default_factory=list)
+    data: _FitnessCore
+
+
 # --- Helpers ----------------------------------------------------------------
 
 
@@ -209,22 +217,25 @@ async def run(
         FITNESS_SYSTEM_PROMPT,
         user_message,
         temperature=0.5,
-        max_tokens=3072,
+        max_tokens=MAX_OUTPUT_TOKENS,
         prefill="{",
+        response_schema=_FitnessResponse.model_json_schema(),
     )
     parsed = extract_json(raw)
 
     try:
-        core = _FitnessCore.model_validate(parsed.get("data", {}))
+        response = _FitnessResponse.model_validate(parsed)
     except ValidationError as exc:
-        raise AgentParseError(f"Fitness data failed validation: {exc}") from exc
+        raise AgentParseError(f"Fitness response failed validation: {exc}") from exc
+
+    core = response.data
 
     if len(core.weekly_plan) != 7:
         raise AgentParseError(
             f"weekly_plan must have exactly 7 days, got {len(core.weekly_plan)}"
         )
 
-    flags: list[str] = [str(f) for f in parsed.get("flags", []) if str(f).strip()]
+    flags: list[str] = [str(f) for f in response.flags if str(f).strip()]
 
     # Deterministic safety overrides / flags.
     equipment = core.equipment_needed
@@ -246,9 +257,9 @@ async def run(
 
     return AgentOutput(
         agent_name=AGENT_NAME.value,
-        verdict=str(parsed.get("verdict", "")).strip() or "Weekly programme generated",
+        verdict=response.verdict.strip() or "Weekly programme generated",
         confidence=_confidence_for(profile),
-        reasoning=str(parsed.get("reasoning", "")).strip(),
+        reasoning=response.reasoning.strip(),
         flags=flags,
         data=data,
         round=round,

@@ -1,6 +1,6 @@
 """Shared plumbing for all specialist agents.
 
-Every agent makes its Anthropic call through `call_claude` (raw httpx, no SDK)
+Every agent makes its Gemini call through `call_claude` (raw httpx, no SDK)
 and parses the model's reply with `extract_json`, so the five specialists share
 one transport, one error surface, and one JSON-recovery strategy.
 """
@@ -11,17 +11,22 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import httpx
+from dotenv import load_dotenv
 
 from schemas.agent_schemas import AgentOutput
 
-# Canonical model id. Mirrors features/coordinator/prompts.py::MODEL.
-DEFAULT_MODEL = "claude-sonnet-4-6"
+# Load backend/.env when running locally so every agent sees GEMINI_API_KEY
+# without requiring the shell or uvicorn to inject it explicitly.
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
-ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
-ANTHROPIC_VERSION = "2023-06-01"
+# Canonical model id. Mirrors features/coordinator/prompts.py::MODEL.
+DEFAULT_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 
 class AgentError(Exception):
@@ -29,7 +34,7 @@ class AgentError(Exception):
 
 
 class AgentAPIError(AgentError):
-    """The Anthropic call failed (auth, network, non-200, bad shape)."""
+    """The Gemini call failed (auth, network, non-200, bad shape)."""
 
 
 class AgentParseError(AgentError):
@@ -44,54 +49,66 @@ async def call_claude(
     max_tokens: int = 2048,
     temperature: float = 0.4,
     prefill: str | None = None,
+    response_schema: dict[str, Any] | None = None,
     timeout: float = 60.0,
 ) -> str:
-    """Single async Messages API call. Returns the concatenated text reply.
+    """Single async Gemini GenerateContent call. Returns the text reply.
 
-    If `prefill` is given it is sent as the start of the assistant turn and
-    prepended to the returned text — use `prefill="{"` to force JSON output.
+    The `prefill` parameter is retained for compatibility with the older
+    legacy prefill path; Gemini JSON mode returns structured output directly, so the
+    helper ignores it.
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        raise AgentAPIError("ANTHROPIC_API_KEY is not set")
+        raise AgentAPIError("GEMINI_API_KEY is not set")
 
-    messages: list[dict[str, Any]] = [{"role": "user", "content": user}]
-    if prefill is not None:
-        messages.append({"role": "assistant", "content": prefill})
+    generation_config: dict[str, Any] = {
+        "temperature": temperature,
+        "maxOutputTokens": max_tokens,
+        "responseMimeType": "application/json",
+        "thinkingConfig": {
+            "thinkingBudget": 0
+        },
+    }
+    if response_schema is not None:
+        generation_config["responseJsonSchema"] = response_schema
 
     payload: dict[str, Any] = {
-        "model": model,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "system": system,
-        "messages": messages,
+        "systemInstruction": {"parts": [{"text": system}]},
+        "contents": [{"role": "user", "parts": [{"text": user}]}],
+        "generationConfig": generation_config,
     }
-    headers = {
-        "x-api-key": api_key,
-        "anthropic-version": ANTHROPIC_VERSION,
-        "content-type": "application/json",
-    }
+    headers = {"content-type": "application/json"}
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(ANTHROPIC_URL, headers=headers, json=payload)
+            resp = await client.post(
+                GEMINI_URL.format(model=model),
+                params={"key": api_key},
+                headers=headers,
+                json=payload,
+            )
     except httpx.HTTPError as exc:
-        raise AgentAPIError(f"Anthropic request failed: {exc}") from exc
+        raise AgentAPIError(f"Gemini request failed: {exc}") from exc
 
     if resp.status_code != 200:
         raise AgentAPIError(
-            f"Anthropic API returned {resp.status_code}: {resp.text[:500]}"
+            f"Gemini API returned {resp.status_code}: {resp.text[:500]}"
         )
 
     body = resp.json()
     try:
+        candidates = body["candidates"]
+        parts = candidates[0]["content"]["parts"]
         text = "".join(
-            block["text"] for block in body["content"] if block.get("type") == "text"
+            block.get("text", "")
+            for block in parts
+            if isinstance(block, dict)
         )
-    except (KeyError, TypeError) as exc:
-        raise AgentAPIError(f"Unexpected Anthropic response shape: {exc}") from exc
+    except (KeyError, TypeError, IndexError) as exc:
+        raise AgentAPIError(f"Unexpected Gemini response shape: {exc}") from exc
 
-    return (prefill or "") + text
+    return text
 
 
 @dataclass

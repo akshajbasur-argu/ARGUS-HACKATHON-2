@@ -6,8 +6,8 @@ Optional services (enabled via env):
 - REDIS_URL  -> durable plan/trace persistence (RedisTraceStore). When unset or
   unreachable, the app falls back to the in-memory store and still runs fully.
 
-Rate limiting is provided by slowapi (per-IP); limits are declared per-route in
-api/routes.py and 429s carry a Retry-After header.
+The app exposes a plain FastAPI surface; no per-route rate limiting is
+enabled in this build.
 """
 
 from __future__ import annotations
@@ -16,19 +16,19 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-import redis.asyncio as aioredis  # redis-py merged aioredis in as redis.asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
 
-from api.limiter import limiter
 from api.routes import router as api_router
 from features.trace.logger import RedisTraceStore
 from features.trace.logger import logger as trace_logger
 
 log = logging.getLogger("hpo.main")
+
+try:
+    import redis.asyncio as aioredis  # redis-py merged aioredis in as redis.asyncio
+except ModuleNotFoundError:  # redis is optional; in-memory fallback still works
+    aioredis = None
 
 
 @asynccontextmanager
@@ -36,7 +36,7 @@ async def lifespan(app: FastAPI):
     """Set up (and tear down) the Redis connection pool when configured."""
     redis_url = os.getenv("REDIS_URL")
     client = None
-    if redis_url:
+    if redis_url and aioredis is not None:
         # A pooled async client; FastAPI shares one pool across requests.
         pool = aioredis.ConnectionPool.from_url(
             redis_url, decode_responses=True, max_connections=20
@@ -53,6 +53,11 @@ async def lifespan(app: FastAPI):
             )
             await client.aclose()
             client = None
+    elif redis_url:
+        log.warning(
+            "REDIS_URL is set but the redis package is not installed; "
+            "using in-memory trace store."
+        )
     else:
         log.info("REDIS_URL not set; using in-memory trace store.")
 
@@ -70,12 +75,6 @@ app = FastAPI(
     description="Multi-agent decision intelligence for personalised health plans.",
     lifespan=lifespan,
 )
-
-# Rate limiting (slowapi). The limiter must live on app.state for the middleware
-# + exception handler to find it; the handler returns 429 + Retry-After.
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-app.add_middleware(SlowAPIMiddleware)
 
 # CORS — allow the Vite dev server and any configured origins.
 _origins = os.getenv(

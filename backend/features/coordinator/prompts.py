@@ -13,7 +13,7 @@ that import the generic name.
 from __future__ import annotations
 
 # Model used across all agents.
-MODEL = "claude-sonnet-4-6"
+MODEL = "gemini-2.5-flash"
 
 # Conditions the coordinator must surface to the Risk Agent with [CRITICAL FLAG].
 # Non-exhaustive guidance baked into the prompt; the Risk Agent does the final

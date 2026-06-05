@@ -341,7 +341,7 @@ async def run(
     if session_context:
         sub_task += session_context.revision_block(AGENT_NAME.value)
     verdict = reasoning = ""
-    if os.environ.get("ANTHROPIC_API_KEY"):
+    if os.environ.get("GEMINI_API_KEY"):
         try:
             data, verdict, reasoning = await _llm_assessment(
                 sub_task, profile, peer_context

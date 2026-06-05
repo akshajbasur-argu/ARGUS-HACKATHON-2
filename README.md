@@ -6,7 +6,7 @@ fan out from a Coordinator, debate via a peer-critique loop, and synthesise a
 final recommendation. Every agent I/O streams to a live Agent Trace View.
 
 **Stack:** React 18 · Vite · Tailwind · TypeScript · Python 3.11 · FastAPI ·
-Pydantic v2 · Anthropic `claude-sonnet-4-6` · Docker Compose.
+Pydantic v2 · Gemini `gemini-2.0-flash` · Docker Compose.
 
 ## Layout
 
@@ -21,7 +21,7 @@ docker-compose.yml
 ### Backend
 ```bash
 cd backend
-cp .env.example .env        # add ANTHROPIC_API_KEY
+cp .env.example .env        # add GEMINI_API_KEY
 poetry install
 poetry run uvicorn main:app --reload --port 8000
 # health check: http://localhost:8000/healthz
@@ -37,7 +37,7 @@ npm run dev                 # http://localhost:5173 (proxies /api -> :8000)
 
 ## Run with Docker
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+export GEMINI_API_KEY=...
 docker compose up --build           # frontend :8080, backend :8000, redis :6379
 ```
 

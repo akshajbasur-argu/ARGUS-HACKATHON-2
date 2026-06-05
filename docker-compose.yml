@@ -3,8 +3,9 @@ services:
     build:
       context: ./backend
     container_name: hpo-backend
+    env_file:
+      - ./backend/.env
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - CORS_ORIGINS=http://localhost:5173,http://localhost:8080
       # Durable plan/trace persistence via the bundled Redis service.
       - REDIS_URL=redis://redis:6379/0

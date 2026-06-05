@@ -6,7 +6,7 @@ from those items, and takes the budget from the profile (authoritative). This
 guarantees the aggregates can never contradict the breakdown, which is the
 numerical signal the Critic uses to check budget consistency.
 
-Run standalone (needs ANTHROPIC_API_KEY):
+Run standalone (needs GEMINI_API_KEY):
     python -m features.agents.budget_agent      # from backend/
     python features/agents/budget_agent.py
 """

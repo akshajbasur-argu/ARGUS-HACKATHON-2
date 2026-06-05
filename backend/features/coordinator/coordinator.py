@@ -72,7 +72,7 @@ def _fallback_subtasks(profile: UserProfile) -> dict[str, str]:
 
 async def decompose(profile: UserProfile) -> dict[str, str]:
     """Break the profile into 6 self-contained sub_tasks (one per agent)."""
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    if not os.environ.get("GEMINI_API_KEY"):
         return _fallback_subtasks(profile)
     try:
         raw = await call_claude(
@@ -158,7 +158,7 @@ async def _llm_narrative(
     by_name: dict[str, AgentOutput],
     critic: AgentOutput,
 ) -> tuple[str, list[str], list[str]] | None:
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    if not os.environ.get("GEMINI_API_KEY"):
         return None
     try:
         payload = {

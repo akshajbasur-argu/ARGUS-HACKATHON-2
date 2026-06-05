@@ -1,8 +1,8 @@
 /**
  * SSE hook for the live Agent Trace View.
  *
- * Subscribes to GET /api/stream?run_id=... and accumulates TraceEvent frames.
- * Pass `runId = null` to stay idle.
+ * Subscribes to GET /api/stream/{planId} and accumulates TraceEvent frames.
+ * Pass `planId = null` to stay idle.
  */
 import { useEffect, useRef, useState } from "react";
 import { streamUrl, type TraceEvent } from "./api";
@@ -13,19 +13,19 @@ export interface TraceStreamState {
   error: string | null;
 }
 
-export function useTraceStream(runId: string | null): TraceStreamState {
+export function useTraceStream(planId: string | null): TraceStreamState {
   const [events, setEvents] = useState<TraceEvent[]>([]);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const sourceRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
-    if (!runId) return;
+    if (!planId) return;
 
     setEvents([]);
     setError(null);
 
-    const source = new EventSource(streamUrl(runId));
+    const source = new EventSource(streamUrl(planId));
     sourceRef.current = source;
 
     source.onopen = () => setConnected(true);
@@ -54,7 +54,7 @@ export function useTraceStream(runId: string | null): TraceStreamState {
       sourceRef.current = null;
       setConnected(false);
     };
-  }, [runId]);
+  }, [planId]);
 
   return { events, connected, error };
 }

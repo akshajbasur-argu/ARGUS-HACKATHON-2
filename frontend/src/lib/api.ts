@@ -136,8 +136,8 @@ export async function runPlan(
 }
 
 /** Absolute URL for the SSE trace stream — consumed by useTraceStream. */
-export function streamUrl(runId: string): string {
-  return `${API_BASE}/stream?run_id=${encodeURIComponent(runId)}`;
+export function streamUrl(planId: string): string {
+  return `${API_BASE}/stream/${encodeURIComponent(planId)}`;
 }
 
 export { ApiError };
