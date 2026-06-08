@@ -77,7 +77,7 @@ export default function AgentTracePanel({ planId }: AgentTracePanelProps) {
 
       <div
         className="relative"
-        style={{ height: "min(62vh, 42rem)", minHeight: "26rem" }}
+        style={{ height: "min(68vh, 52rem)", minHeight: "30rem" }}
       >
         {tab === "graph" ? (
           <AgentTraceGraph derived={derived} selected={selected} onSelect={setSelected} />

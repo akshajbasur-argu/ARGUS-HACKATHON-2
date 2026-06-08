@@ -7,15 +7,17 @@
  * Critic→specialist "revision (rN)" (debate feedback), specialist/Critic→Synthesis
  * "feeds plan". Clicking any node opens the Step Detail drawer.
  */
-import { useMemo } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   Background,
   BackgroundVariant,
+  ControlButton,
   Controls,
   Handle,
   MarkerType,
   Position,
   ReactFlow,
+  useReactFlow,
   type Edge,
   type Node,
   type NodeProps,
@@ -317,33 +319,107 @@ interface AgentTraceGraphProps {
   onSelect: (nodeKey: string) => void;
 }
 
+/**
+ * GraphControls — rendered *inside* <ReactFlow> so it has access to the
+ * Zustand store via useReactFlow(). The outer component must NOT call
+ * useReactFlow() directly.
+ */
+function GraphControls({
+  containerRef,
+}: {
+  containerRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const { fitView } = useReactFlow();
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const toggleFullscreen = useCallback(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (!document.fullscreenElement) {
+      el.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
+    } else {
+      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+    }
+  }, [containerRef]);
+
+  return (
+    <Controls
+      showInteractive={false}
+      showZoom
+      showFitView
+      onFitView={() => fitView({ padding: 0.18, duration: 350 })}
+      style={{
+        background: "rgba(17,24,39,0.85)",
+        border: "1px solid rgba(255,255,255,0.10)",
+        borderRadius: "10px",
+        backdropFilter: "blur(12px)",
+        display: "flex",
+        flexDirection: "column",
+        gap: "2px",
+        padding: "4px",
+        boxShadow: "0 4px 24px rgba(0,0,0,0.4)",
+      }}
+    >
+      <ControlButton
+        onClick={toggleFullscreen}
+        title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+        aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+        style={{ color: "var(--color-text-secondary)" }}
+      >
+        {isFullscreen ? (
+          <svg viewBox="0 0 20 20" fill="currentColor" width="12" height="12">
+            <path d="M3.28 2.22a.75.75 0 0 0-1.06 1.06L5.44 6.5H3a.75.75 0 0 0 0 1.5h4A.75.75 0 0 0 7.75 7V3a.75.75 0 0 0-1.5 0v2.44L2.22 1.16a.75.75 0 0 0 0 1.06Zm13.44 0a.75.75 0 0 1 1.06 1.06L14.56 6.5H17a.75.75 0 0 1 0 1.5h-4a.75.75 0 0 1-.75-.75V3a.75.75 0 0 1 1.5 0v2.44l4.03-4.22ZM2.22 17.78a.75.75 0 0 1-1.06-1.06L4.44 13.5H2a.75.75 0 0 1 0-1.5h4c.414 0 .75.336.75.75V17a.75.75 0 0 1-1.5 0v-2.44l-3.03 3.22Zm15.56 0a.75.75 0 0 0 1.06-1.06L15.56 13.5H18a.75.75 0 0 0 0-1.5h-4a.75.75 0 0 0-.75.75V17a.75.75 0 0 0 1.5 0v-2.44l3.03 3.22Z"/>
+          </svg>
+        ) : (
+          <svg viewBox="0 0 20 20" fill="currentColor" width="12" height="12">
+            <path d="M1.75 1h4.5a.75.75 0 0 1 0 1.5H3.56l3.97 3.97a.75.75 0 0 1-1.06 1.06L2.5 3.56v2.69a.75.75 0 0 1-1.5 0v-4.5C1 1.336 1.336 1 1.75 1Zm16.5 0h-4.5a.75.75 0 0 0 0 1.5h2.69l-3.97 3.97a.75.75 0 1 0 1.06 1.06L17.5 3.56v2.69a.75.75 0 0 0 1.5 0v-4.5A.75.75 0 0 0 18.25 1ZM2.5 16.44l3.97-3.97a.75.75 0 0 0-1.06-1.06L1.5 15.31v-2.69a.75.75 0 0 0-1.5 0v4.5c0 .414.336.75.75.75h4.5a.75.75 0 0 0 0-1.5H2.5Zm15 0-3.97-3.97a.75.75 0 1 1 1.06-1.06l3.91 3.9v-2.69a.75.75 0 0 1 1.5 0v4.5a.75.75 0 0 1-.75.75h-4.5a.75.75 0 0 1 0-1.5h2.69Z"/>
+          </svg>
+        )}
+      </ControlButton>
+    </Controls>
+  );
+}
+
 export default function AgentTraceGraph({
   derived,
   selected,
   onSelect,
 }: AgentTraceGraphProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const { nodes, edges } = useMemo(
     () => buildGraph(derived, selected),
     [derived, selected],
   );
 
   return (
-    <ReactFlow
-      nodes={nodes}
-      edges={edges}
-      nodeTypes={nodeTypes}
-      onNodeClick={(_, node) => onSelect(node.id)}
-      fitView
-      fitViewOptions={{ padding: 0.18 }}
-      minZoom={0.3}
-      maxZoom={1.6}
-      nodesDraggable={false}
-      nodesConnectable={false}
-      proOptions={{ hideAttribution: true }}
-      className="rounded-lg"
+    <div
+      ref={containerRef}
+      style={{
+        width: "100%",
+        height: "100%",
+        background: "var(--color-surface-1)",
+        borderRadius: "12px",
+        overflow: "hidden",
+      }}
     >
-      <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="var(--color-border)" />
-      <Controls showInteractive={false} className="!border-border !bg-surface-2" />
-    </ReactFlow>
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        onNodeClick={(_, node) => onSelect(node.id)}
+        fitView
+        fitViewOptions={{ padding: 0.18 }}
+        minZoom={0.3}
+        maxZoom={1.6}
+        nodesDraggable={false}
+        nodesConnectable={false}
+        proOptions={{ hideAttribution: true }}
+        className="rounded-lg"
+      >
+        <Background variant={BackgroundVariant.Dots} gap={18} size={1} color="var(--color-border)" />
+        {/* GraphControls lives inside ReactFlow so useReactFlow() works */}
+        <GraphControls containerRef={containerRef} />
+      </ReactFlow>
+    </div>
   );
 }

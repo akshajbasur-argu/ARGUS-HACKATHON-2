@@ -423,3 +423,55 @@ h1, h2, h3, h4, h5, h6 {
     display: block !important;
   }
 }
+
+/* ============================================================================
+   REACT FLOW — Controls dark theme override
+   ========================================================================== */
+
+/* Remove the default white box-shadow and background from controls panel */
+.react-flow__controls {
+  box-shadow: none !important;
+  background: transparent !important;
+  border: none !important;
+}
+
+/* Each control button */
+.react-flow__controls-button {
+  background: transparent !important;
+  border: none !important;
+  color: var(--color-text-secondary) !important;
+  width: 28px !important;
+  height: 28px !important;
+  border-radius: 6px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: background var(--duration-fast) var(--ease-out),
+              color var(--duration-fast) var(--ease-out) !important;
+}
+
+.react-flow__controls-button:hover {
+  background: rgba(0, 212, 170, 0.12) !important;
+  color: var(--color-accent-primary) !important;
+}
+
+.react-flow__controls-button:disabled {
+  opacity: 0.35 !important;
+  cursor: not-allowed !important;
+}
+
+/* SVG icons inside buttons */
+.react-flow__controls-button svg {
+  fill: currentColor !important;
+}
+
+/* Fullscreen container styling */
+.react-flow__container:-webkit-full-screen {
+  width: 100vw !important;
+  height: 100vh !important;
+}
+.react-flow__container:fullscreen {
+  width: 100vw !important;
+  height: 100vh !important;
+}
+
